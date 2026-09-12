@@ -1,0 +1,7 @@
+site_hostname      = "example.com"
+redirect_hostnames = ["www.example.com"]
+hosted_zone_id     = "REPLACE_FROM_SHARED_OUTPUT"
+monthly_budget_usd = 25
+
+# Keep the real address in 1Password and inject it into an ignored terraform.tfvars.
+budget_alert_emails = ["budget-alerts@example.com"]

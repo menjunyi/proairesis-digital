@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788672209845,
+      "tag": "0000_kind_nico_minoru",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788673687730,
+      "tag": "0001_careful_wilson_fisk",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788676779413,
+      "tag": "0002_past_the_twelve",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788680134302,
+      "tag": "0003_tranquil_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788948711178,
+      "tag": "0004_high_major_mapleleaf",
+      "breakpoints": true
+    }
+  ]
+}

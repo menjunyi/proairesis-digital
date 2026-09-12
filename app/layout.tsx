@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   ),
   title: 'Pip — Find the jobs you can actually pursue',
   description:
-    'An eligibility-first job-search product for Australian technology professionals. Get evidence-backed role decisions and truthful, human-reviewed application drafts.',
+    'Your skills fit. Does the job? Explore work-rights, sponsorship, citizenship, clearance and location requirements for your next professional role in Australia, including applications from overseas.',
   openGraph: {
     title: 'Pip — Find the jobs you can actually pursue',
     description:

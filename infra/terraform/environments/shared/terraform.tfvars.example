@@ -1,0 +1,20 @@
+domain_name = "example.com"
+
+cost_anomaly_alert_emails  = ["budget-alerts@example.com"]
+cost_anomaly_threshold_usd = 5
+
+# Copy only values shown by the relevant Google admin console. Do not guess them.
+dns_records = {
+  # google_workspace_mx = {
+  #   name    = "example.com"
+  #   type    = "MX"
+  #   ttl     = 300
+  #   records = ["PRIORITY VERIFIED_GOOGLE_MAIL_SERVER"]
+  # }
+  # google_search_console = {
+  #   name    = "example.com"
+  #   type    = "TXT"
+  #   ttl     = 300
+  #   records = ["google-site-verification=VALUE_FROM_SEARCH_CONSOLE"]
+  # }
+}

@@ -1,0 +1,14 @@
+import type { Metadata } from 'next';
+import { LegalDocumentPage } from '@/app/legal/legal-document-page';
+import { legalContent } from '../../lib/legal-content';
+const source = legalContent["disclaimer"];
+
+export const metadata: Metadata = {
+  title: 'Disclaimer — Pip',
+  description:
+    'Important limitations of Pip job-search and AI-assisted outputs.',
+};
+
+export default function DisclaimerPage() {
+  return <LegalDocumentPage source={source} activeHref="/disclaimer" />;
+}

@@ -1,0 +1,7 @@
+bucket         = "REPLACE_WITH_STATE_BUCKET"
+key            = "proairesis-digital/shared/terraform.tfstate"
+region         = "ap-southeast-2"
+encrypt        = true
+kms_key_id     = "REPLACE_WITH_STATE_KMS_KEY_ARN"
+dynamodb_table = "proairesis-digital-terraform-locks"
+
