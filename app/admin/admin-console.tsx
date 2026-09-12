@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
+import { RoleClueMark } from '@/components/roleclue-mark';
 import {
   Activity,
   BadgeDollarSign,
@@ -121,14 +121,7 @@ function Brand() {
   return (
     <div className="flex items-center gap-3">
       <span className="grid size-10 place-items-center overflow-hidden rounded-xl bg-[#dff7ef] ring-1 ring-white/15">
-        <Image
-          src="/pip-flight.gif"
-          alt=""
-          width={48}
-          height={48}
-          unoptimized
-          className="size-12 scale-125 object-contain"
-        />
+        <RoleClueMark className="size-10 text-[#85c5ae]" />
       </span>
       <span>
         <span className="block text-lg font-black leading-none tracking-[-0.04em] text-white">
@@ -315,7 +308,7 @@ export function AdminConsole({
               <Icon className="size-[18px]" />
               <span className="flex-1">{item.label}</span>
               {item.label === 'Agents' ? (
-                <span className="text-[9px] font-black uppercase tracking-[0.09em] text-[#72d6bd]">
+                <span className="text-[9px] font-black uppercase tracking-[0.09em] text-[#85c5ae]">
                   Kanban
                 </span>
               ) : null}
@@ -340,7 +333,7 @@ export function AdminConsole({
           className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-white/8"
           type="button"
         >
-          <span className="grid size-9 place-items-center rounded-full bg-[#f5c85b] text-xs font-black text-[#173c3e]">
+          <span className="grid size-9 place-items-center rounded-full bg-[#f5c85b] text-xs font-black text-[#062f3b]">
             {currentAdmin.initials}
           </span>
           <span className="min-w-0 flex-1">
@@ -358,8 +351,8 @@ export function AdminConsole({
   );
 
   return (
-    <main className="min-h-screen bg-[#f4f1e8] text-[#173c3e]">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col bg-[#173c3e] lg:flex">
+    <main className="min-h-screen bg-[#fbf4e8] text-[#062f3b]">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col bg-[#062f3b] lg:flex">
         {sidebar}
       </aside>
 
@@ -371,18 +364,18 @@ export function AdminConsole({
             onClick={() => setMobileOpen(false)}
             aria-label="Close navigation"
           />
-          <aside className="relative flex h-full w-[280px] flex-col bg-[#173c3e] shadow-2xl">
+          <aside className="relative flex h-full w-[280px] flex-col bg-[#062f3b] shadow-2xl">
             {sidebar}
           </aside>
         </div>
       ) : null}
 
       <div className="lg:pl-[248px]">
-        <header className="sticky top-0 z-30 flex h-[76px] items-center gap-3 border-b border-[#173c3e]/10 bg-[#fffdf7]/92 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-[76px] items-center gap-3 border-b border-[#062f3b]/10 bg-[#fffaf1]/92 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="grid size-10 place-items-center rounded-xl border border-[#173c3e]/10 text-[#173c3e] lg:hidden"
+            className="grid size-10 place-items-center rounded-xl border border-[#062f3b]/10 text-[#062f3b] lg:hidden"
             aria-label="Open navigation"
           >
             <Menu className="size-5" />
@@ -394,7 +387,7 @@ export function AdminConsole({
               placeholder="Search users, consultants or ID…"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              className="h-10 rounded-xl border-[#173c3e]/10 bg-[#f4f1e8] pl-10 shadow-none"
+              className="h-10 rounded-xl border-[#062f3b]/10 bg-[#fbf4e8] pl-10 shadow-none"
             />
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -409,7 +402,7 @@ export function AdminConsole({
               aria-label="Notifications"
             >
               <Bell className="size-[18px]" />
-              <span className="absolute right-2 top-2 size-2 rounded-full bg-[#e55336] ring-2 ring-white" />
+              <span className="absolute right-2 top-2 size-2 rounded-full bg-[#c34527] ring-2 ring-white" />
             </Button>
             <Button
               variant="outline"
@@ -425,7 +418,7 @@ export function AdminConsole({
         <div className="mx-auto max-w-[1500px] px-4 py-7 sm:px-6 lg:px-8 lg:py-9">
           <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.13em] text-[#e55336]">
+              <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.13em] text-[#c34527]">
                 <ShieldCheck className="size-4" />
                 Private operations workspace
               </div>
@@ -456,7 +449,7 @@ export function AdminConsole({
                   <Download /> Export view
                 </Button>
                 <Button
-                  className="h-10 rounded-xl bg-[#173c3e] px-4 font-bold text-white hover:bg-[#28595b]"
+                  className="h-10 rounded-xl bg-[#062f3b] px-4 font-bold text-white hover:bg-[#28595b]"
                   onClick={() => setDialog({ kind: 'invite' })}
                 >
                   <UserPlus /> Invite user
@@ -607,12 +600,12 @@ function Overview({
             mint: 'bg-[#dff7ef] text-[#0b6c59]',
             yellow: 'bg-[#fff0c8] text-[#805c00]',
             orange: 'bg-[#ffe5dc] text-[#b83f28]',
-            blue: 'bg-[#e2eef5] text-[#315f79]',
+            blue: 'bg-[#e2eef5] text-[#315f5f]',
           } as const;
           return (
             <article
               key={metric.label}
-              className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
+              className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -638,8 +631,8 @@ function Overview({
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(330px,0.7fr)]">
-        <article className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-          <div className="flex flex-col gap-3 border-b border-[#173c3e]/9 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <article className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+          <div className="flex flex-col gap-3 border-b border-[#062f3b]/9 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-black tracking-[-0.025em]">
                 Recent B2C users
@@ -651,7 +644,7 @@ function Overview({
               </p>
             </div>
             <button
-              className="flex items-center gap-1 text-sm font-black text-[#0b6c59] hover:text-[#173c3e]"
+              className="flex items-center gap-1 text-sm font-black text-[#0b6c59] hover:text-[#062f3b]"
               type="button"
               onClick={() => onNavigate('B2C users')}
             >
@@ -661,7 +654,7 @@ function Overview({
           <UserTable rows={filteredUsers.slice(0, 5)} onManage={onManageUser} />
         </article>
 
-        <article className="rounded-2xl border border-[#173c3e]/9 bg-[#173c3e] p-5 text-white shadow-[0_14px_36px_rgba(23,60,62,0.14)]">
+        <article className="rounded-2xl border border-[#062f3b]/9 bg-[#062f3b] p-5 text-white shadow-[0_14px_36px_rgba(23,60,62,0.14)]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.13em] text-[#8fdcc9]">
@@ -704,7 +697,7 @@ function Overview({
                   type="button"
                 >
                   <span
-                    className={`grid size-9 place-items-center rounded-lg ${item.urgent ? 'bg-[#e55336]/20 text-[#ffac99]' : 'bg-white/10 text-[#c9dad8]'}`}
+                    className={`grid size-9 place-items-center rounded-lg ${item.urgent ? 'bg-[#c34527]/20 text-[#ffac99]' : 'bg-white/10 text-[#c9dad8]'}`}
                   >
                     <Icon className="size-4" />
                   </span>
@@ -723,7 +716,7 @@ function Overview({
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]">
-        <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-black tracking-[-0.025em]">
@@ -742,7 +735,7 @@ function Overview({
               Review queue
             </Button>
           </div>
-          <div className="mt-4 divide-y divide-[#173c3e]/8">
+          <div className="mt-4 divide-y divide-[#062f3b]/8">
             {snapshot.consultants
               .filter((consultant) =>
                 ['submitted', 'more_information_required'].includes(
@@ -796,7 +789,7 @@ function Overview({
           </div>
         </article>
 
-        <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-black tracking-[-0.025em]">
@@ -831,7 +824,7 @@ function Overview({
                 label: 'Shortlist delivery',
                 value: '96.8%',
                 note: '2 partial deliveries',
-                colour: '#e55336',
+                colour: '#c34527',
               },
             ].map((service) => (
               <div key={service.label}>
@@ -892,8 +885,8 @@ function SectionContent({
 }) {
   if (view === 'B2C users') {
     return (
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-3 border-b border-[#173c3e]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-3 border-b border-[#062f3b]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#708a87]" />
             <Input
@@ -919,8 +912,8 @@ function SectionContent({
 
   if (view === 'Consultants') {
     return (
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-3 border-b border-[#173c3e]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-3 border-b border-[#062f3b]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-black">Consultant accounts</h2>
             <p className="mt-1 text-xs text-[#708a87]">
@@ -1019,8 +1012,8 @@ function SectionContent({
 
   if (view === 'Assignments') {
     return (
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-3 border-b border-[#173c3e]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-3 border-b border-[#062f3b]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-black">
               Candidate–consultant assignments
@@ -1030,7 +1023,7 @@ function SectionContent({
             </p>
           </div>
           <Button
-            className="h-9 rounded-xl bg-[#173c3e] px-4 font-bold text-white"
+            className="h-9 rounded-xl bg-[#062f3b] px-4 font-bold text-white"
             onClick={onAssign}
           >
             <UserCheck /> New assignment
@@ -1135,8 +1128,8 @@ function SectionContent({
             warning={attention > 0}
           />
         </div>
-        <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-          <div className="border-b border-[#173c3e]/9 p-5">
+        <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+          <div className="border-b border-[#062f3b]/9 p-5">
             <h2 className="text-lg font-black">Workflow activity</h2>
             <p className="mt-1 text-xs text-[#708a87]">
               User-facing job discovery, eligibility and delivery activity.
@@ -1204,8 +1197,8 @@ function SectionContent({
 
   if (view === 'Audit log') {
     return (
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex items-center gap-3 border-b border-[#173c3e]/9 p-5">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex items-center gap-3 border-b border-[#062f3b]/9 p-5">
           <span className="grid size-10 place-items-center rounded-xl bg-[#dff7ef] text-[#0b6c59]">
             <History className="size-5" />
           </span>
@@ -1332,7 +1325,7 @@ function SectionContent({
   }
 
   return (
-    <section className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-10 text-center shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+    <section className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-10 text-center shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
       <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#dff7ef] text-[#0b6c59]">
         <CheckCircle2 className="size-7" />
       </span>
@@ -1341,7 +1334,7 @@ function SectionContent({
         This section will use the same protected account data, explicit
         permissions and complete audit history as the rest of the admin centre.
       </p>
-      <Button className="mt-5 rounded-xl bg-[#173c3e] px-4 font-bold text-white">
+      <Button className="mt-5 rounded-xl bg-[#062f3b] px-4 font-bold text-white">
         Open first task
       </Button>
     </section>
@@ -1453,7 +1446,7 @@ function SummaryTile({
   warning?: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+    <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold text-[#587174]">{label}</p>
@@ -1482,7 +1475,7 @@ function SettingsCard({
   items: string[];
 }) {
   return (
-    <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-6 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+    <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-6 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
       <span className="grid size-11 place-items-center rounded-2xl bg-[#dff7ef] text-[#0b6c59]">
         <Icon className="size-5" />
       </span>
@@ -1596,7 +1589,7 @@ function FormShell({
   return (
     <>
       <DialogHeader className="px-6 pb-1 pt-6">
-        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
           {eyebrow}
         </p>
         <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -1611,7 +1604,7 @@ function FormShell({
         <Button
           type="submit"
           disabled={busy}
-          className="h-10 rounded-xl bg-[#173c3e] px-4 font-bold text-white"
+          className="h-10 rounded-xl bg-[#062f3b] px-4 font-bold text-white"
         >
           {busy ? 'Saving…' : submitLabel}
         </Button>
@@ -1717,7 +1710,7 @@ function InviteForm({
             id="invite-role"
             value={role}
             onChange={(event) => setRole(event.target.value as typeof role)}
-            className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus:border-[#e55336] focus:ring-3 focus:ring-[#e55336]/15"
+            className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus:border-[#c34527] focus:ring-3 focus:ring-[#c34527]/15"
           >
             <option value="registered_user">B2C candidate</option>
             <option value="consultant">Consultant applicant</option>
@@ -1792,7 +1785,7 @@ function UserManagementForm({
         busy={busy}
       >
         <FieldError message={error} />
-        <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#f4f1e8] p-4 text-xs">
+        <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#fbf4e8] p-4 text-xs">
           <div>
             <span className="block text-[#708a87]">Current status</span>
             <span className="mt-1 block font-black capitalize">
@@ -1900,7 +1893,7 @@ function ConsultantDecisionForm({
         busy={busy}
       >
         <FieldError message={error} />
-        <div className="rounded-xl bg-[#f4f1e8] p-4">
+        <div className="rounded-xl bg-[#fbf4e8] p-4">
           <div className="flex items-center justify-between text-sm">
             <span className="font-bold">Required checks</span>
             <span className="font-black">
@@ -2182,8 +2175,8 @@ function EndAssignmentForm({
         busy={busy}
       >
         <FieldError message={error} />
-        <div className="rounded-xl bg-[#f4f1e8] p-4 text-xs leading-5 text-[#587174]">
-          <span className="block font-black text-[#173c3e]">
+        <div className="rounded-xl bg-[#fbf4e8] p-4 text-xs leading-5 text-[#587174]">
+          <span className="block font-black text-[#062f3b]">
             Current consent scope
           </span>
           {assignment.consentScope}

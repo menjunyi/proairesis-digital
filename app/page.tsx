@@ -1,3 +1,4 @@
+import { RoleClueMark } from '@/components/roleclue-mark';
 import {
   ArrowDown,
   ArrowRight,
@@ -45,11 +46,11 @@ const steps = [
 ];
 const questions = [
   [
-    'Is RoleClue only for people in Canberra?',
+    'Who is RoleClue’s Australian job search for?',
     'No. RoleClue is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
   ],
   [
-    'Can I use RoleClue if I need visa sponsorship?',
+    'Can RoleClue help me assess jobs that may require visa sponsorship?',
     'Sponsorship is one of the requirements RoleClue helps you examine. An employer accepting temporary work rights today is different from offering sponsorship later. If the advertisement does not make that clear, the decision should stay uncertain until you confirm it with the employer.',
   ],
   [
@@ -68,12 +69,7 @@ const questions = [
 function Brand() {
   return (
     <a className="pip-brand" href="#top" aria-label="RoleClue home">
-      <span className="pip-mark" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-        <i />
-      </span>
+      <RoleClueMark className="roleclue-mark" />
       RoleClue<span className="brand-caption">Job eligibility</span>
     </a>
   );
@@ -104,12 +100,14 @@ export default function Home() {
       <section className="pip-hero pip-wrap" id="main-content">
         <div className="hero-heading">
           <p className="pip-eyebrow">
-            <span className="pixel-dot" /> A clearer way to find your next role
+            <span className="pixel-dot" /> AI job search · Australia
           </p>
           <h1>
-            Your skills fit.
+            Find the jobs
             <br />
-            Does the <span>job?</span>
+            you can actually
+            <br />
+            <span>pursue.</span>
           </h1>
         </div>
         <div className="hero-intro">
@@ -140,62 +138,20 @@ export default function Home() {
           className="signal-stage"
           aria-label="Illustrative diagram: job requirements checked against your situation"
         >
-          <div className="stage-top">
-            <span>FROM SEARCH RESULTS TO A CLEARER DECISION</span>
-            <span>THE ROLECLUE APPROACH ↗</span>
+          <div className="role-preview-heading"><span>YOUR NEXT MOVE, WITH EVIDENCE</span><RoleClueMark className="roleclue-mark" /></div>
+          <div className="role-preview-card">
+            <span className="role-preview-status positive"><CheckCheck size={24} /></span>
+            <div><h3>Worth a closer look</h3><p>“Applicants with valid Australian work rights welcome.”</p><span>Compare with your circumstances</span></div>
           </div>
-          <div className="signal-input">
-            <span className="pip-eyebrow">Your next opportunity</span>
-            <div className="signal-lines">
-              <span />
-              <span />
-              <span />
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-            <p>More than a keyword match.</p>
+          <div className="role-preview-card">
+            <span className="role-preview-status uncertain"><CircleHelp size={24} /></span>
+            <div><h3>Ask before you apply</h3><p>Sponsorship is not mentioned in the advertisement.</p><span>Confirm with the employer</span></div>
           </div>
-          <div className="signal-engine">
-            <div className="engine-grid" aria-hidden="true">
-              {Array.from({ length: 81 }, (_, i) => (
-                <i
-                  key={i}
-                  className={
-                    i % 9 > 1 &&
-                    i % 9 < 7 &&
-                    Math.floor(i / 9) > 1 &&
-                    Math.floor(i / 9) < 7
-                      ? 'filled'
-                      : ''
-                  }
-                />
-              ))}
-            </div>
-            <span className="engine-label">RoleClue / eligibility engine</span>
+          <div className="role-preview-card">
+            <span className="role-preview-status conflict"><X size={24} /></span>
+            <div><h3>A requirement conflicts</h3><p>“Australian citizenship required.”</p><span>A blocker if you are not a citizen</span></div>
           </div>
-          <div className="signal-output">
-            <div>
-              <CheckCheck size={19} />
-              <span>Worth pursuing</span>
-              <ArrowUpRight size={18} />
-            </div>
-            <div>
-              <CircleHelp size={19} />
-              <span>Needs a closer look</span>
-              <span>?</span>
-            </div>
-            <div>
-              <X size={19} />
-              <span>A requirement rules it out</span>
-              <span>−</span>
-            </div>
-          </div>
-          <div className="stage-bottom">
-            <span>YOUR PROFILE × THE JOB REQUIREMENTS</span>
-            <span>Illustrative workflow</span>
-          </div>
+          <div className="role-preview-footer"><span>Illustrative examples, not live vacancies.</span><span className="preview-dots" aria-hidden="true">•••<br/>•••<br/>•••</span></div>
         </div>
         <div className="check-strip">
           <span>Checked before fit.</span>

@@ -209,8 +209,8 @@ export function CommissionWorkspace({
         />
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-4 border-b border-[#173c3e]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-4 border-b border-[#062f3b]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black tracking-[-0.025em]">
@@ -226,7 +226,7 @@ export function CommissionWorkspace({
             </p>
           </div>
           <Button
-            className="h-10 rounded-xl bg-[#173c3e] font-bold text-white"
+            className="h-10 rounded-xl bg-[#062f3b] font-bold text-white"
             onClick={() => void saveRules()}
             disabled={savingRules}
           >
@@ -237,7 +237,7 @@ export function CommissionWorkspace({
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow className="bg-[#f4f1e8]/65">
+              <TableRow className="bg-[#fbf4e8]/65">
                 <TableHead>Lead source</TableHead>
                 <TableHead>Pool from sale</TableHead>
                 <TableHead>Lead generator</TableHead>
@@ -312,15 +312,15 @@ export function CommissionWorkspace({
             </TableBody>
           </Table>
         </div>
-        <div className="border-t border-[#173c3e]/8 bg-[#fff8df] px-5 py-3 text-xs font-semibold leading-5 text-[#795a00]">
+        <div className="border-t border-[#062f3b]/8 bg-[#fff8df] px-5 py-3 text-xs font-semibold leading-5 text-[#795a00]">
           Example: a $2,000 sale with a 10% pool creates $200 commission. A
           30/70 split gives $60 to the lead generator and $140 to the closer.
           The suggested values are not active until saved.
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-4 border-b border-[#173c3e]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-4 border-b border-[#062f3b]/9 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-black">Commission ledger</h2>
             <p className="mt-1 text-xs text-[#708a87]">
@@ -337,7 +337,7 @@ export function CommissionWorkspace({
               <UserPlus /> Add staff
             </Button>
             <Button
-              className="h-10 rounded-xl bg-[#173c3e] font-bold text-white"
+              className="h-10 rounded-xl bg-[#062f3b] font-bold text-white"
               onClick={() => setDialog('conversion')}
             >
               <Plus /> Record conversion
@@ -347,7 +347,7 @@ export function CommissionWorkspace({
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
-              <TableRow className="bg-[#f4f1e8]/65">
+              <TableRow className="bg-[#fbf4e8]/65">
                 <TableHead>Customer / source</TableHead>
                 <TableHead>Sale</TableHead>
                 <TableHead>Lead generator</TableHead>
@@ -405,7 +405,7 @@ export function CommissionWorkspace({
                       {entry.status === 'eligible' ? (
                         <Button
                           size="sm"
-                          className="bg-[#173c3e] text-white"
+                          className="bg-[#062f3b] text-white"
                           onClick={() =>
                             void changeStatus(entry.id, 'approved')
                           }
@@ -416,7 +416,7 @@ export function CommissionWorkspace({
                       {entry.status === 'approved' ? (
                         <Button
                           size="sm"
-                          className="bg-[#173c3e] text-white"
+                          className="bg-[#062f3b] text-white"
                           onClick={() => void changeStatus(entry.id, 'paid')}
                         >
                           Mark paid
@@ -453,11 +453,11 @@ export function CommissionWorkspace({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+      <section className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
         <div className="flex items-center gap-2">
           <UsersRound className="size-5 text-[#0b6c59]" />
           <h2 className="text-lg font-black">Commission staff</h2>
-          <Badge variant="outline" className="bg-[#f4f1e8] text-[#587174]">
+          <Badge variant="outline" className="bg-[#fbf4e8] text-[#587174]">
             {
               snapshot.commissionStaff.filter(
                 (staff) => staff.status === 'active',
@@ -470,7 +470,7 @@ export function CommissionWorkspace({
           {snapshot.commissionStaff.map((staff) => (
             <div
               key={staff.id}
-              className="rounded-xl border border-[#173c3e]/9 bg-white p-4"
+              className="rounded-xl border border-[#062f3b]/9 bg-white p-4"
             >
               <div className="flex items-center justify-between gap-2">
                 <p className="font-black">{staff.name}</p>
@@ -479,7 +479,7 @@ export function CommissionWorkspace({
                   className={
                     staff.status === 'active'
                       ? 'border-[#b9e9dc] bg-[#e8f8f3] text-[#0b6c59]'
-                      : 'bg-[#f4f1e8] text-[#708a87]'
+                      : 'bg-[#fbf4e8] text-[#708a87]'
                   }
                 >
                   {staff.status}
@@ -540,7 +540,7 @@ function CommissionMetric({
   warning?: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+    <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold text-[#587174]">{label}</p>
@@ -949,7 +949,7 @@ function FormHeader({
 }) {
   return (
     <DialogHeader className="px-6 pb-1 pt-6">
-      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
         {eyebrow}
       </p>
       <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -966,7 +966,7 @@ function FormFooter({ busy, label }: { busy: boolean; label: string }) {
       <Button
         type="submit"
         disabled={busy}
-        className="h-10 rounded-xl bg-[#173c3e] px-4 font-bold text-white"
+        className="h-10 rounded-xl bg-[#062f3b] px-4 font-bold text-white"
       >
         {busy ? 'Saving…' : label}
       </Button>

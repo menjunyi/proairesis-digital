@@ -124,7 +124,7 @@ const agentColumns: Array<{
   {
     label: 'Blocked',
     statuses: ['blocked', 'failed'],
-    tone: 'bg-[#f4f1e8] text-[#6f5a55]',
+    tone: 'bg-[#fbf4e8] text-[#6f5a55]',
   },
   {
     label: 'Completed',
@@ -400,7 +400,7 @@ export function TaskWorkspace({
 
   if (loading) {
     return (
-      <div className="grid min-h-64 place-items-center rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7]">
+      <div className="grid min-h-64 place-items-center rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1]">
         <div className="flex items-center gap-3 text-sm font-bold text-[#587174]">
           <Loader2 className="size-5 animate-spin" /> Loading the work system…
         </div>
@@ -444,8 +444,8 @@ export function TaskWorkspace({
           <MetricGrid metrics={metrics} />
           <WorkflowStrip tasks={snapshot.tasks} onRecordEvent={recordEvent} />
 
-          <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-            <div className="flex flex-col gap-4 border-b border-[#173c3e]/9 p-5 xl:flex-row xl:items-center xl:justify-between">
+          <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+            <div className="flex flex-col gap-4 border-b border-[#062f3b]/9 p-5 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <h2 className="text-lg font-black tracking-[-0.025em]">
                   {taskView === 'hierarchy'
@@ -459,13 +459,13 @@ export function TaskWorkspace({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <div className="flex rounded-xl bg-[#f4f1e8] p-1">
+                <div className="flex rounded-xl bg-[#fbf4e8] p-1">
                   <Button
                     size="sm"
                     variant={taskView === 'hierarchy' ? 'default' : 'ghost'}
                     className={
                       taskView === 'hierarchy'
-                        ? 'rounded-lg bg-[#173c3e] font-bold text-white'
+                        ? 'rounded-lg bg-[#062f3b] font-bold text-white'
                         : 'rounded-lg font-bold text-[#587174]'
                     }
                     onClick={() => setTaskView('hierarchy')}
@@ -477,7 +477,7 @@ export function TaskWorkspace({
                     variant={taskView === 'dag' ? 'default' : 'ghost'}
                     className={
                       taskView === 'dag'
-                        ? 'rounded-lg bg-[#173c3e] font-bold text-white'
+                        ? 'rounded-lg bg-[#062f3b] font-bold text-white'
                         : 'rounded-lg font-bold text-[#587174]'
                     }
                     onClick={() => setTaskView('dag')}
@@ -502,7 +502,7 @@ export function TaskWorkspace({
                   <Workflow /> Add workflow
                 </Button>
                 <Button
-                  className="rounded-xl bg-[#173c3e] font-bold text-white"
+                  className="rounded-xl bg-[#062f3b] font-bold text-white"
                   onClick={() => setDialog('task')}
                 >
                   <Plus /> New task
@@ -512,7 +512,7 @@ export function TaskWorkspace({
 
             {taskView === 'hierarchy' ? (
               <>
-                <div className="border-b border-[#173c3e]/9 p-4">
+                <div className="border-b border-[#062f3b]/9 p-4">
                   <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_auto]">
                     <div className="relative block">
                       <Label htmlFor="task-workspace-search" className="sr-only">
@@ -564,7 +564,7 @@ export function TaskWorkspace({
                   </div>
                 </div>
 
-                <div className="divide-y divide-[#173c3e]/8">
+                <div className="divide-y divide-[#062f3b]/8">
                   {displayedTasks.map(({ task, depth }) => (
                     <TaskRow
                       key={task.id}
@@ -708,7 +708,7 @@ function MetricGrid({ metrics }: { metrics: ReturnType<typeof taskMetrics> }) {
         return (
           <article
             key={item.label}
-            className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
+            className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -749,7 +749,7 @@ function WorkflowStrip({
   return (
     <section aria-labelledby="active-workflows-heading">
       <div className="mb-3 flex items-center gap-2">
-        <GitBranch className="size-4 text-[#e55336]" />
+        <GitBranch className="size-4 text-[#c34527]" />
         <h2 id="active-workflows-heading" className="text-sm font-black">
           Active workflows
         </h2>
@@ -777,11 +777,11 @@ function WorkflowStrip({
           return (
             <article
               key={root.id}
-              className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
+              className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#e55336]">
+                  <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#c34527]">
                     {root.workflowType}
                   </p>
                   <h3 className="mt-1 truncate text-base font-black">
@@ -863,7 +863,7 @@ function DependencyDag({
 
   return (
     <div className="bg-[#fbfaf5]">
-      <div className="flex flex-col gap-4 border-b border-[#173c3e]/9 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 border-b border-[#062f3b]/9 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap gap-2 text-xs font-bold text-[#587174]">
           <span className="rounded-full bg-[#e8f8f3] px-3 py-1.5 text-[#0b6c59]">
             {graph.dependencies.length} dependency links
@@ -900,10 +900,10 @@ function DependencyDag({
           <div className="flex min-w-max items-stretch gap-3">
             {graph.layers.map((layer, layerIndex) => (
               <div key={`layer-${layerIndex}`} className="flex items-stretch gap-3">
-                <section className="w-[292px] rounded-2xl border border-[#173c3e]/8 bg-white/75 p-3">
+                <section className="w-[292px] rounded-2xl border border-[#062f3b]/8 bg-white/75 p-3">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#e55336]">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#c34527]">
                         Stage {layerIndex + 1}
                       </p>
                       <h3 className="mt-0.5 text-sm font-black">
@@ -942,10 +942,10 @@ function DependencyDag({
                           key={task.id}
                           className={`rounded-xl border p-4 shadow-[0_5px_16px_rgba(23,60,62,0.04)] ${
                             unresolved.length
-                              ? 'border-[#ecd99e] bg-[#fffdf7]'
+                              ? 'border-[#ecd99e] bg-[#fffaf1]'
                               : task.status === 'done'
                                 ? 'border-[#b9e9dc] bg-[#f5fcf9]'
-                                : 'border-[#173c3e]/9 bg-white'
+                                : 'border-[#062f3b]/9 bg-white'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -960,7 +960,7 @@ function DependencyDag({
                           </p>
 
                           {incoming.length ? (
-                            <div className="mt-3 space-y-1.5 rounded-lg bg-[#f4f1e8] p-2.5">
+                            <div className="mt-3 space-y-1.5 rounded-lg bg-[#fbf4e8] p-2.5">
                               <p className="text-[10px] font-black uppercase tracking-[0.1em] text-[#708a87]">
                                 Prerequisites
                               </p>
@@ -1034,7 +1034,7 @@ function DependencyDag({
                   </div>
                 </section>
                 {layerIndex < graph.layers.length - 1 ? (
-                  <div className="flex w-8 items-start justify-center pt-16 text-[#e55336]">
+                  <div className="flex w-8 items-start justify-center pt-16 text-[#c34527]">
                     <ArrowRight className="size-5" />
                   </div>
                 ) : null}
@@ -1106,7 +1106,7 @@ function TaskRow({
         </p>
       </div>
       <div className="text-xs">
-        <p className="font-bold text-[#173c3e]">{formatDue(task.dueAt)}</p>
+        <p className="font-bold text-[#062f3b]">{formatDue(task.dueAt)}</p>
         {task.waitingReason ? (
           <p className="mt-1 line-clamp-2 text-[#b06b19]">
             {task.waitingReason}
@@ -1152,10 +1152,10 @@ function AgentControlRoom({
   ).length;
   return (
     <>
-      <section className="overflow-hidden rounded-2xl bg-[#173c3e] p-6 text-white shadow-[0_14px_40px_rgba(23,60,62,0.18)]">
+      <section className="overflow-hidden rounded-2xl bg-[#062f3b] p-6 text-white shadow-[0_14px_40px_rgba(23,60,62,0.18)]">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.13em] text-[#72d6bd]">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.13em] text-[#85c5ae]">
               <Bot className="size-4" /> Agent map
             </div>
             <h2 className="mt-2 text-2xl font-black tracking-[-0.04em]">
@@ -1167,7 +1167,7 @@ function AgentControlRoom({
             </p>
           </div>
           <Button
-            className="rounded-xl bg-[#f5c85b] font-black text-[#173c3e] hover:bg-[#ffe08b]"
+            className="rounded-xl bg-[#f5c85b] font-black text-[#062f3b] hover:bg-[#ffe08b]"
             onClick={onNewAgent}
           >
             <Plus /> Register Codex session
@@ -1210,7 +1210,7 @@ function AgentControlRoom({
                   {agents.map((agent) => (
                     <article
                       key={agent.id}
-                      className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-4 shadow-[0_8px_22px_rgba(23,60,62,0.05)]"
+                      className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-4 shadow-[0_8px_22px_rgba(23,60,62,0.05)]"
                     >
                       <div className="flex items-start gap-2">
                         <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-[#dff7ef] text-[#0b6c59]">
@@ -1220,7 +1220,7 @@ function AgentControlRoom({
                           <h4 className="line-clamp-2 text-sm font-black">
                             {agent.name}
                           </h4>
-                          <p className="mt-1 text-[11px] font-semibold text-[#e55336]">
+                          <p className="mt-1 text-[11px] font-semibold text-[#c34527]">
                             {agent.taskTitle}
                           </p>
                         </div>
@@ -1229,8 +1229,8 @@ function AgentControlRoom({
                         {agent.summary || 'No activity summary yet.'}
                       </p>
                       {agent.nextAction ? (
-                        <div className="mt-3 rounded-xl bg-[#f4f1e8] p-3 text-[11px] leading-5 text-[#4e6967]">
-                          <span className="font-black text-[#173c3e]">
+                        <div className="mt-3 rounded-xl bg-[#fbf4e8] p-3 text-[11px] leading-5 text-[#4e6967]">
+                          <span className="font-black text-[#062f3b]">
                             Next:{' '}
                           </span>
                           {agent.nextAction}
@@ -1262,7 +1262,7 @@ function AgentControlRoom({
                     </article>
                   ))}
                   {!agents.length ? (
-                    <div className="rounded-2xl border border-dashed border-[#173c3e]/15 px-3 py-8 text-center text-xs text-[#8a9996]">
+                    <div className="rounded-2xl border border-dashed border-[#062f3b]/15 px-3 py-8 text-center text-xs text-[#8a9996]">
                       No sessions
                     </div>
                   ) : null}
@@ -1319,7 +1319,7 @@ function TaskDialog({
     <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl sm:max-w-xl">
       <form onSubmit={submit}>
         <DialogHeader>
-          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
             Work OS
           </p>
           <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -1432,7 +1432,7 @@ function TaskDialog({
           <Button
             type="submit"
             disabled={busy}
-            className="rounded-xl bg-[#173c3e] font-bold text-white"
+            className="rounded-xl bg-[#062f3b] font-bold text-white"
           >
             {busy ? 'Creating…' : 'Create task'}
           </Button>
@@ -1474,7 +1474,7 @@ function WorkflowDialog({
     <DialogContent className="rounded-2xl sm:max-w-lg">
       <form onSubmit={submit}>
         <DialogHeader>
-          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
             Conditional work
           </p>
           <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -1506,12 +1506,12 @@ function WorkflowDialog({
               placeholder="e.g. Network Engineer · Company X"
             />
           ) : template === 'skills_assessment' ? (
-            <div className="rounded-xl bg-[#f4f1e8] p-4 text-sm leading-6 text-[#587174]">
+            <div className="rounded-xl bg-[#fbf4e8] p-4 text-sm leading-6 text-[#587174]">
               Post-result tasks stay hidden from progress until you record the
               assessment result.
             </div>
           ) : (
-            <div className="rounded-xl bg-[#f4f1e8] p-4 text-sm leading-6 text-[#587174]">
+            <div className="rounded-xl bg-[#fbf4e8] p-4 text-sm leading-6 text-[#587174]">
               Creates the active application, PTE, outreach, referee and Agent
               Group commitments from this week’s journal.
             </div>
@@ -1526,7 +1526,7 @@ function WorkflowDialog({
           <Button
             type="submit"
             disabled={busy}
-            className="rounded-xl bg-[#173c3e] font-bold text-white"
+            className="rounded-xl bg-[#062f3b] font-bold text-white"
           >
             <Sparkles /> {busy ? 'Creating…' : 'Create workflow'}
           </Button>
@@ -1590,7 +1590,7 @@ function DependencyDialog({
     <DialogContent className="rounded-2xl sm:max-w-lg">
       <form onSubmit={submit}>
         <DialogHeader>
-          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
             Dependency DAG
           </p>
           <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -1619,7 +1619,7 @@ function DependencyDialog({
               </option>
             ))}
           </SelectField>
-          <div className="flex justify-center text-[#e55336]">
+          <div className="flex justify-center text-[#c34527]">
             <ArrowRight className="size-5 rotate-90" aria-hidden="true" />
           </div>
           <SelectField
@@ -1645,7 +1645,7 @@ function DependencyDialog({
           <Button
             type="submit"
             disabled={busy || !taskId || !dependsOnTaskId}
-            className="rounded-xl bg-[#173c3e] font-bold text-white"
+            className="rounded-xl bg-[#062f3b] font-bold text-white"
           >
             <GitBranch /> {busy ? 'Connecting…' : 'Add dependency'}
           </Button>
@@ -1694,7 +1694,7 @@ function AgentDialog({
     <DialogContent className="rounded-2xl sm:max-w-lg">
       <form onSubmit={submit}>
         <DialogHeader>
-          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
             Agent map
           </p>
           <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -1761,7 +1761,7 @@ function AgentDialog({
           <Button
             type="submit"
             disabled={busy}
-            className="rounded-xl bg-[#173c3e] font-bold text-white"
+            className="rounded-xl bg-[#062f3b] font-bold text-white"
           >
             <Bot /> {busy ? 'Registering…' : 'Register session'}
           </Button>
@@ -1872,7 +1872,7 @@ function ExecutorBadge({ executor }: { executor: WorkExecutorType }) {
   const Icon =
     executor === 'human' ? UserRound : executor === 'agent' ? Bot : Sparkles;
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-black capitalize text-[#173c3e]">
+    <span className="inline-flex items-center gap-1.5 text-xs font-black capitalize text-[#062f3b]">
       <Icon className="size-3.5 text-[#13866f]" /> {executor}
     </span>
   );

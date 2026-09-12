@@ -50,73 +50,74 @@
 
 :root {
   --font-body: 'Avenir Next', Avenir, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-display: Georgia, 'Times New Roman', serif;
   --font-code: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-  --background: #f3f8fc;
-  --foreground: #17324d;
+  --background: #fbf4e8;
+  --foreground: #062f3b;
   --card: #ffffff;
-  --card-foreground: #17324d;
+  --card-foreground: #062f3b;
   --popover: #ffffff;
-  --popover-foreground: #17324d;
-  --primary: #17324d;
+  --popover-foreground: #062f3b;
+  --primary: #062f3b;
   --primary-foreground: #ffffff;
-  --secondary: #e7f1f9;
-  --secondary-foreground: #17324d;
-  --muted: #e7f1f9;
-  --muted-foreground: #536d83;
-  --accent: #deeffc;
-  --accent-foreground: #245f8e;
+  --secondary: #f2e8d8;
+  --secondary-foreground: #062f3b;
+  --muted: #f2e8d8;
+  --muted-foreground: #526d70;
+  --accent: #d9eee3;
+  --accent-foreground: #245c54;
   --destructive: #b64236;
   --border: rgb(23 60 62 / 12%);
   --input: rgb(23 60 62 / 16%);
-  --ring: #286b9e;
-  --chart-1: #286b9e;
+  --ring: #236451;
+  --chart-1: #236451;
   --chart-2: #13866f;
-  --chart-3: #a9cfec;
-  --chart-4: #536d83;
-  --chart-5: #17324d;
+  --chart-3: #85c5ae;
+  --chart-4: #526d70;
+  --chart-5: #062f3b;
   --radius: 0.85rem;
   --sidebar: #ffffff;
-  --sidebar-foreground: #17324d;
-  --sidebar-primary: #17324d;
+  --sidebar-foreground: #062f3b;
+  --sidebar-primary: #062f3b;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #deeffc;
-  --sidebar-accent-foreground: #245f8e;
+  --sidebar-accent: #d9eee3;
+  --sidebar-accent-foreground: #245c54;
   --sidebar-border: rgb(23 60 62 / 12%);
-  --sidebar-ring: #286b9e;
+  --sidebar-ring: #236451;
 }
 
 .dark {
-  --background: #142d43;
+  --background: #052631;
   --foreground: #ffffff;
-  --card: #17324d;
+  --card: #062f3b;
   --card-foreground: #ffffff;
-  --popover: #17324d;
+  --popover: #062f3b;
   --popover-foreground: #ffffff;
-  --primary: #a9cfec;
-  --primary-foreground: #142d43;
-  --secondary: #203f59;
+  --primary: #85c5ae;
+  --primary-foreground: #052631;
+  --secondary: #123e47;
   --secondary-foreground: #ffffff;
-  --muted: #203f59;
-  --muted-foreground: #bdcede;
-  --accent: #345875;
+  --muted: #123e47;
+  --muted-foreground: #bad7d0;
+  --accent: #27565d;
   --accent-foreground: #ffffff;
   --destructive: #f3a79d;
   --border: rgb(255 255 255 / 12%);
   --input: rgb(255 255 255 / 16%);
-  --ring: #a9cfec;
+  --ring: #85c5ae;
   --chart-1: #f3a79d;
-  --chart-2: #a9cfec;
-  --chart-3: #a9cfec;
-  --chart-4: #bdcede;
+  --chart-2: #85c5ae;
+  --chart-3: #85c5ae;
+  --chart-4: #bad7d0;
   --chart-5: #ffffff;
-  --sidebar: #17324d;
+  --sidebar: #062f3b;
   --sidebar-foreground: #ffffff;
-  --sidebar-primary: #a9cfec;
-  --sidebar-primary-foreground: #142d43;
-  --sidebar-accent: #203f59;
+  --sidebar-primary: #85c5ae;
+  --sidebar-primary-foreground: #052631;
+  --sidebar-accent: #123e47;
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: rgb(255 255 255 / 12%);
-  --sidebar-ring: #a9cfec;
+  --sidebar-ring: #85c5ae;
 }
 
 @layer base {
@@ -139,8 +140,8 @@
   }
 
   ::selection {
-    background: #a9cfec;
-    color: #17324d;
+    background: #85c5ae;
+    color: #062f3b;
   }
 }
 
@@ -177,7 +178,7 @@
     linear-gradient(rgb(255 255 255 / 5%) 1px, transparent 1px),
     linear-gradient(90deg, rgb(255 255 255 / 5%) 1px, transparent 1px);
   background-size: 24px 24px;
-  background-color: #17324d;
+  background-color: #062f3b;
 }
 
 .pilot-rings {
@@ -207,3 +208,10 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* RoleClue reference theme shared by marketing, legal and account pages. */
+@layer base {
+  h1, h2 { font-family: var(--font-display); letter-spacing: -0.035em; }
+  h1 { font-weight: 700; }
+}
+.roleclue-mark { width: 36px; height: 36px; flex: none; }

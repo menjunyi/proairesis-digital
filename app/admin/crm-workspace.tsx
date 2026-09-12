@@ -41,7 +41,7 @@ const stages: Array<{ value: CrmStage; label: string; dot: string }> = [
   { value: 'qualified', label: 'Qualified', dot: 'bg-[#5c8fa9]' },
   { value: 'onboarding', label: 'Onboarding', dot: 'bg-[#9c72c2]' },
   { value: 'active_search', label: 'Active search', dot: 'bg-[#13866f]' },
-  { value: 'placed', label: 'Placed', dot: 'bg-[#173c3e]' },
+  { value: 'placed', label: 'Placed', dot: 'bg-[#062f3b]' },
   { value: 'nurture', label: 'Nurture', dot: 'bg-[#9b9a91]' },
 ];
 
@@ -121,8 +121,8 @@ export function CrmWorkspace({
         />
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-        <div className="flex flex-col gap-4 border-b border-[#173c3e]/9 p-5 lg:flex-row lg:items-center lg:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+        <div className="flex flex-col gap-4 border-b border-[#062f3b]/9 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black tracking-[-0.025em]">
@@ -130,7 +130,7 @@ export function CrmWorkspace({
               </h2>
               <Badge
                 variant="outline"
-                className="bg-[#f4f1e8] font-bold text-[#587174]"
+                className="bg-[#fbf4e8] font-bold text-[#587174]"
               >
                 {contacts.length} contacts
               </Badge>
@@ -158,7 +158,7 @@ export function CrmWorkspace({
               <MessageSquare /> Log interaction
             </Button>
             <Button
-              className="h-10 rounded-xl bg-[#173c3e] font-bold text-white"
+              className="h-10 rounded-xl bg-[#062f3b] font-bold text-white"
               onClick={() => setDialog({ kind: 'task' })}
             >
               <Plus /> Follow-up
@@ -166,7 +166,7 @@ export function CrmWorkspace({
           </div>
         </div>
 
-        <div className="overflow-x-auto bg-[#f4f1e8]/65 p-4">
+        <div className="overflow-x-auto bg-[#fbf4e8]/65 p-4">
           <div className="grid min-w-[1430px] grid-cols-6 gap-3">
             {stages.map((stage) => {
               const stageContacts = contacts.filter(
@@ -175,7 +175,7 @@ export function CrmWorkspace({
               return (
                 <div
                   key={stage.value}
-                  className="rounded-xl border border-[#173c3e]/8 bg-[#ebe8de]/55 p-2.5"
+                  className="rounded-xl border border-[#062f3b]/8 bg-[#ebe8de]/55 p-2.5"
                 >
                   <div className="mb-3 flex items-center gap-2 px-1">
                     <span className={`size-2 rounded-full ${stage.dot}`} />
@@ -192,7 +192,7 @@ export function CrmWorkspace({
                         key={contact.userId}
                         type="button"
                         onClick={() => setDialog({ kind: 'contact', contact })}
-                        className="block w-full rounded-xl border border-[#173c3e]/9 bg-[#fffdf7] p-3 text-left shadow-[0_4px_12px_rgba(23,60,62,0.04)] transition hover:-translate-y-0.5 hover:border-[#13866f]/35 hover:shadow-md"
+                        className="block w-full rounded-xl border border-[#062f3b]/9 bg-[#fffaf1] p-3 text-left shadow-[0_4px_12px_rgba(23,60,62,0.04)] transition hover:-translate-y-0.5 hover:border-[#13866f]/35 hover:shadow-md"
                       >
                         <div className="flex items-start gap-2.5">
                           <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#dff7ef] text-[10px] font-black text-[#0b6c59]">
@@ -208,7 +208,7 @@ export function CrmWorkspace({
                           </span>
                           {contact.priority === 'high' ? (
                             <span
-                              className="mt-1 size-2 rounded-full bg-[#e55336]"
+                              className="mt-1 size-2 rounded-full bg-[#c34527]"
                               title="High priority"
                             />
                           ) : null}
@@ -218,7 +218,7 @@ export function CrmWorkspace({
                             {contact.nextAction}
                           </p>
                         ) : null}
-                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#173c3e]/7 pt-2 text-[10px] text-[#708a87]">
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#062f3b]/7 pt-2 text-[10px] text-[#708a87]">
                           <span className="truncate">{contact.ownerName}</span>
                           <span className="shrink-0">
                             {contact.nextFollowUpAt}
@@ -227,7 +227,7 @@ export function CrmWorkspace({
                       </button>
                     ))}
                     {!stageContacts.length ? (
-                      <div className="rounded-xl border border-dashed border-[#173c3e]/12 px-3 py-8 text-center text-[11px] font-semibold text-[#8a9996]">
+                      <div className="rounded-xl border border-dashed border-[#062f3b]/12 px-3 py-8 text-center text-[11px] font-semibold text-[#8a9996]">
                         No contacts
                       </div>
                     ) : null}
@@ -240,8 +240,8 @@ export function CrmWorkspace({
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-          <div className="flex items-center justify-between border-b border-[#173c3e]/9 p-5">
+        <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+          <div className="flex items-center justify-between border-b border-[#062f3b]/9 p-5">
             <div>
               <h2 className="text-lg font-black">Follow-up list</h2>
               <p className="mt-1 text-xs text-[#708a87]">
@@ -254,7 +254,7 @@ export function CrmWorkspace({
               </Badge>
             ) : null}
           </div>
-          <div className="divide-y divide-[#173c3e]/8">
+          <div className="divide-y divide-[#062f3b]/8">
             {openTasks.slice(0, 8).map((task) => (
               <div key={task.id} className="flex items-center gap-3 px-5 py-4">
                 <button
@@ -262,7 +262,7 @@ export function CrmWorkspace({
                   onClick={() =>
                     void completeTask(task.id, dataMode, completed)
                   }
-                  className="grid size-8 shrink-0 place-items-center rounded-full border border-[#173c3e]/15 bg-white text-[#708a87] hover:border-[#13866f] hover:bg-[#e8f8f3] hover:text-[#0b6c59]"
+                  className="grid size-8 shrink-0 place-items-center rounded-full border border-[#062f3b]/15 bg-white text-[#708a87] hover:border-[#13866f] hover:bg-[#e8f8f3] hover:text-[#0b6c59]"
                   aria-label={`Complete ${task.title}`}
                 >
                   <Check className="size-4" />
@@ -286,14 +286,14 @@ export function CrmWorkspace({
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
-          <div className="border-b border-[#173c3e]/9 p-5">
+        <section className="overflow-hidden rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+          <div className="border-b border-[#062f3b]/9 p-5">
             <h2 className="text-lg font-black">Recent contact history</h2>
             <p className="mt-1 text-xs text-[#708a87]">
               Calls, meetings, emails, notes, and pipeline changes
             </p>
           </div>
-          <div className="divide-y divide-[#173c3e]/8">
+          <div className="divide-y divide-[#062f3b]/8">
             {snapshot.crmActivities.slice(0, 8).map((activity) => {
               const Icon =
                 activity.activityType === 'call'
@@ -392,7 +392,7 @@ function CrmMetric({
   warning?: boolean;
 }) {
   return (
-    <article className="rounded-2xl border border-[#173c3e]/9 bg-[#fffdf7] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
+    <article className="rounded-2xl border border-[#062f3b]/9 bg-[#fffaf1] p-5 shadow-[0_8px_28px_rgba(23,60,62,0.05)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold text-[#587174]">{label}</p>
@@ -437,7 +437,7 @@ function CrmFormShell({
   return (
     <>
       <DialogHeader className="px-6 pb-1 pt-6">
-        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#e55336]">
+        <p className="text-[10px] font-black uppercase tracking-[0.15em] text-[#c34527]">
           {eyebrow}
         </p>
         <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
@@ -452,7 +452,7 @@ function CrmFormShell({
         <Button
           type="submit"
           disabled={busy}
-          className="h-10 rounded-xl bg-[#173c3e] px-4 font-bold text-white"
+          className="h-10 rounded-xl bg-[#062f3b] px-4 font-bold text-white"
         >
           {busy ? 'Saving…' : submitLabel}
         </Button>

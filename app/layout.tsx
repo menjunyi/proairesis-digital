@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: '/og.png?v=roleclue',
+        url: '/og.png?v=roleclue-focus',
         width: 1731,
         height: 909,
         alt: 'RoleClue — AI job search and eligibility checks for Australia',
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     title: 'RoleClue — AI job search and eligibility checks for Australia',
     description:
       'Eligibility first. Evidence on every decision. No auto-apply.',
-    images: ['/og.png?v=roleclue'],
+    images: ['/og.png?v=roleclue-focus'],
   },
 };
 
