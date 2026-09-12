@@ -75,7 +75,7 @@ function Brand() {
   );
 }
 export default function Home() {
-  const { email, meetingHref, hasBookingLink } = getContactDetails();
+  const { email } = getContactDetails();
   return (
     <main id="top" className="pip-landing">
       <a href="#main-content" className="pip-skip">
@@ -91,7 +91,7 @@ export default function Home() {
         </nav>
         <Link
           className="pip-button small"
-          href="#contact"
+          href="/book"
           data-analytics-location="header"
         >
           Book a conversation <ArrowUpRight size={16} />
@@ -122,7 +122,7 @@ export default function Home() {
             </a>
             <Link
               className="pip-text-link"
-              href="#contact"
+              href="/book"
               data-analytics-location="hero"
             >
               Let’s talk <ArrowUpRight size={17} />
@@ -406,25 +406,9 @@ export default function Home() {
                 </li>
               ))}
             </ul>
-            {meetingHref ? (
-              <a
-                className="pip-button"
-                href={meetingHref}
-                data-analytics-location="contact"
-                {...(hasBookingLink
-                  ? { target: '_blank', rel: 'noopener noreferrer' }
-                  : {})}
-              >
-                {hasBookingLink
-                  ? 'Choose a time to talk'
-                  : 'Email to arrange a time'}{' '}
-                <ArrowUpRight size={18} />
-              </a>
-            ) : (
-              <p className="contact-unavailable">
-                Contact and booking details will be available here soon.
-              </p>
-            )}
+            <Link className="pip-button" href="/book" data-analytics-location="contact">
+              Choose a date and time <ArrowUpRight size={18} />
+            </Link>
             {email && (
               <p>
                 <a className="pip-text-link" href={`mailto:${email}`}>
@@ -433,9 +417,7 @@ export default function Home() {
               </p>
             )}
             <p className="pip-caption">
-              {hasBookingLink
-                ? 'Choose an available slot on the booking page.'
-                : 'Suggest a few suitable times and your time zone. Your meeting is only booked once we confirm it by email.'}{' '}
+              Review the available booking options on the next page.{' '}
               Please don’t send passport numbers, identity documents or other
               sensitive information.
             </p>
@@ -477,7 +459,7 @@ export default function Home() {
             </a>
             <Link
               className="pip-text-link"
-              href="#contact"
+              href="/book"
               data-analytics-location="footer"
             >
               Talk about your search <ArrowUpRight size={18} />
