@@ -4,8 +4,8 @@ import { legalContent } from '../../lib/legal-content';
 const source = legalContent["terms-and-conditions"];
 
 export const metadata: Metadata = {
-  title: 'Terms and Conditions — Pip',
-  description: 'Terms governing access to and use of Pip.',
+  title: 'Terms and Conditions — RoleClue',
+  description: 'Terms governing access to and use of RoleClue.',
 };
 
 export default function TermsPage() {

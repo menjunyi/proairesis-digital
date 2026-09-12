@@ -4,9 +4,9 @@ import { legalContent } from '../../lib/legal-content';
 const source = legalContent["membership-agreement"];
 
 export const metadata: Metadata = {
-  title: 'Membership Agreement — Pip',
+  title: 'Membership Agreement — RoleClue',
   description:
-    'The agreement electronically signed when purchasing a Pip membership.',
+    'The agreement electronically signed when purchasing a RoleClue membership.',
 };
 
 export default function MembershipAgreementPage() {

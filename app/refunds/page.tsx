@@ -4,9 +4,9 @@ import { legalContent } from '../../lib/legal-content';
 const source = legalContent["refund-and-cancellation-policy"];
 
 export const metadata: Metadata = {
-  title: 'Refund and Cancellation Policy — Pip',
+  title: 'Refund and Cancellation Policy — RoleClue',
   description:
-    'Pip’s seven-day no-reason membership refund promise and cancellation process.',
+    'RoleClue’s seven-day no-reason membership refund promise and cancellation process.',
 };
 
 export default function RefundsPage() {

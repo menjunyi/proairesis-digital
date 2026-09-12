@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   const memberCountry = formData.get('memberCountry');
   if (memberCountry !== 'Australia' && memberCountry !== 'New Zealand') {
     return Response.json(
-      { error: 'Pip membership is available in Australia and New Zealand.' },
+      { error: 'RoleClue membership is available in Australia and New Zealand.' },
       { status: 400 },
     );
   }

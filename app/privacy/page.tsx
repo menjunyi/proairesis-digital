@@ -4,8 +4,8 @@ import { legalContent } from '../../lib/legal-content';
 const source = legalContent["privacy-policy"];
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Pip',
-  description: 'How Pip handles personal information.',
+  title: 'Privacy Policy — RoleClue',
+  description: 'How RoleClue handles personal information.',
 };
 
 export default function PrivacyPage() {

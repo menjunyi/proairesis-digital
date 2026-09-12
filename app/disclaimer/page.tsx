@@ -4,9 +4,9 @@ import { legalContent } from '../../lib/legal-content';
 const source = legalContent["disclaimer"];
 
 export const metadata: Metadata = {
-  title: 'Disclaimer — Pip',
+  title: 'Disclaimer — RoleClue',
   description:
-    'Important limitations of Pip job-search and AI-assisted outputs.',
+    'Important limitations of RoleClue job-search and AI-assisted outputs.',
 };
 
 export default function DisclaimerPage() {

@@ -311,7 +311,7 @@ export async function getAdminSnapshot(
                   ) AS stage,
                   COALESCE(crm.priority, 'normal') AS priority,
                   COALESCE(owner.full_name, 'Unassigned') AS owner_name,
-                  COALESCE(crm.source, 'Pip') AS source,
+                  COALESCE(crm.source, 'RoleClue') AS source,
                   COALESCE(crm.tags_json, '[]') AS tags_json,
                   COALESCE(crm.next_action, '') AS next_action,
                   crm.next_follow_up_at,

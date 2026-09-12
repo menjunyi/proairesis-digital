@@ -6,9 +6,9 @@ import { getAdminSnapshot, requireSuperAdmin } from '@/lib/admin.server';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Pip Admin — Platform operations',
+  title: 'RoleClue Admin — Platform operations',
   description:
-    'Manage Pip relationships, candidates, consultants, assignments and operations.',
+    'Manage RoleClue relationships, candidates, consultants, assignments and operations.',
 };
 
 export default async function AdminPage({

@@ -47,7 +47,7 @@ function PlanCard({ overview }: { overview: BillingOverview | null }) {
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#245f8e]">
-            Pip monthly
+            RoleClue monthly
           </p>
           <div className="mt-3 flex items-end gap-2 text-[#17324d]">
             <span className="text-6xl font-semibold tracking-[-0.07em]">
@@ -281,7 +281,7 @@ export default async function BillingPage() {
           href="/"
           className="inline-flex items-center gap-2 text-sm font-semibold text-[#425e75] transition-colors hover:text-[#286b9e]"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to Pip
+          <ArrowLeft className="h-4 w-4" /> Back to RoleClue
         </Link>
 
         <div className="mt-10 grid gap-10 lg:grid-cols-[0.86fr_1.14fr] lg:items-start">
@@ -290,7 +290,7 @@ export default async function BillingPage() {
               <Sparkles className="h-4 w-4" /> Simple monthly membership
             </span>
             <h1 className="mt-6 text-5xl font-semibold leading-[0.95] tracking-[-0.065em] text-[#17324d] sm:text-6xl">
-              Start free. Subscribe when Pip earns its place.
+              Start free. Subscribe when RoleClue earns its place.
             </h1>
             <p className="mt-6 text-lg leading-8 text-[#536d83]">
               Generate two résumés before paying. There is no countdown and no
@@ -336,7 +336,7 @@ export default async function BillingPage() {
                 Sign in to see your usage and subscription.
               </h2>
               <p className="mt-4 leading-7 text-[#536d83]">
-                Your Pip account keeps the two complimentary generations and
+                Your RoleClue account keeps the two complimentary generations and
                 billing status attached to you.
               </p>
               <a

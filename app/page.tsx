@@ -34,7 +34,7 @@ const steps = [
     n: '02',
     icon: ScanLine,
     title: 'See what the job really requires.',
-    body: 'Pip checks the wording, highlights the blockers and brings unclear conditions to your attention.',
+    body: 'RoleClue checks the wording, highlights the blockers and brings unclear conditions to your attention.',
   },
   {
     n: '03',
@@ -45,36 +45,36 @@ const steps = [
 ];
 const questions = [
   [
-    'Is Pip only for people in Canberra?',
-    'No. Pip is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
+    'Is RoleClue only for people in Canberra?',
+    'No. RoleClue is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
   ],
   [
-    'Can I use Pip if I need visa sponsorship?',
-    'Sponsorship is one of the requirements Pip helps you examine. An employer accepting temporary work rights today is different from offering sponsorship later. If the advertisement does not make that clear, the decision should stay uncertain until you confirm it with the employer.',
+    'Can I use RoleClue if I need visa sponsorship?',
+    'Sponsorship is one of the requirements RoleClue helps you examine. An employer accepting temporary work rights today is different from offering sponsorship later. If the advertisement does not make that clear, the decision should stay uncertain until you confirm it with the employer.',
   ],
   [
     'Does a positive decision mean I will get the job?',
     'No. It means the available job requirements appear compatible with the profile being checked. Employers make hiring decisions. A good skills match, or an employer having sponsored before, does not guarantee an interview, sponsorship or an offer.',
   ],
   [
-    'Will Pip find every available job?',
+    'Will RoleClue find every available job?',
     'No. Coverage depends on the supported sources and the job information available. You should keep using your existing job boards and alerts, and check the original listing before applying.',
   ],
   [
-    'Does Pip apply on my behalf?',
-    'You stay in control. Review the evidence, edit any drafts and submit the application yourself. Pip does not invent experience or answer work-rights declarations for you.',
+    'Does RoleClue apply on my behalf?',
+    'You stay in control. Review the evidence, edit any drafts and submit the application yourself. RoleClue does not invent experience or answer work-rights declarations for you.',
   ],
 ];
 function Brand() {
   return (
-    <a className="pip-brand" href="#top" aria-label="Pip home">
+    <a className="pip-brand" href="#top" aria-label="RoleClue home">
       <span className="pip-mark" aria-hidden="true">
         <i />
         <i />
         <i />
         <i />
       </span>
-      Pip<span className="brand-caption">Job eligibility</span>
+      RoleClue<span className="brand-caption">Job eligibility</span>
     </a>
   );
 }
@@ -88,7 +88,7 @@ export default function Home() {
       <header className="pip-header">
         <Brand />
         <nav aria-label="Main navigation">
-          <a href="#decisions">Why Pip</a>
+          <a href="#decisions">Why RoleClue</a>
           <a href="#how">How it works</a>
           <a href="#contact">Contact</a>
           <a href="#questions">FAQs</a>
@@ -115,12 +115,12 @@ export default function Home() {
         <div className="hero-intro">
           <p>
             Find the requirements that matter <strong>before you apply.</strong>{' '}
-            Pip checks work rights, sponsorship, citizenship, clearance and
+            RoleClue checks work rights, sponsorship, citizenship, clearance and
             location—so you can focus on jobs worth your time.
           </p>
           <div className="pip-actions">
             <a className="pip-button" href="#decisions">
-              See how Pip decides <ArrowDown size={17} />
+              See how RoleClue decides <ArrowDown size={17} />
             </a>
             <Link
               className="pip-text-link"
@@ -142,7 +142,7 @@ export default function Home() {
         >
           <div className="stage-top">
             <span>FROM SEARCH RESULTS TO A CLEARER DECISION</span>
-            <span>THE PIP APPROACH ↗</span>
+            <span>THE ROLECLUE APPROACH ↗</span>
           </div>
           <div className="signal-input">
             <span className="pip-eyebrow">Your next opportunity</span>
@@ -173,7 +173,7 @@ export default function Home() {
                 />
               ))}
             </div>
-            <span className="engine-label">Pip / eligibility engine</span>
+            <span className="engine-label">RoleClue / eligibility engine</span>
           </div>
           <div className="signal-output">
             <div>
@@ -217,7 +217,7 @@ export default function Home() {
           </h2>
           <p>
             You find a promising role. Then comes “citizenship required” or “no
-            sponsorship.” Pip brings those conditions to the surface before you
+            sponsorship.” RoleClue brings those conditions to the surface before you
             invest in an application.
           </p>
         </div>
@@ -240,7 +240,7 @@ export default function Home() {
                   <dd>Not an Australian citizen</dd>
                 </div>
                 <div>
-                  <dt>Pip’s decision</dt>
+                  <dt>RoleClue’s decision</dt>
                   <dd>Skip this role</dd>
                 </div>
               </dl>
@@ -269,7 +269,7 @@ export default function Home() {
                   <dd>Work rights now; sponsorship later</dd>
                 </div>
                 <div>
-                  <dt>Pip’s decision</dt>
+                  <dt>RoleClue’s decision</dt>
                   <dd>Ask the employer</dd>
                 </div>
               </dl>
@@ -299,7 +299,7 @@ export default function Home() {
                   <dd>Overseas; open to relocation</dd>
                 </div>
                 <div>
-                  <dt>Pip’s decision</dt>
+                  <dt>RoleClue’s decision</dt>
                   <dd>Explore this opportunity</dd>
                 </div>
               </dl>
@@ -422,7 +422,7 @@ export default function Home() {
             <p>
               Tell me about the roles you’re looking for and the requirements
               getting in your way. We’ll talk through your situation and whether
-              Pip could help.
+              RoleClue could help.
             </p>
             <p className="pricing-context">
               An introductory product conversation—not migration advice, a job
@@ -557,7 +557,7 @@ export default function Home() {
           ))}
         </nav>
         <p className="pip-caption">
-          Pip does not provide migration or clearance advice, or guarantee jobs,
+          RoleClue does not provide migration or clearance advice, or guarantee jobs,
           interviews or sponsorship.
         </p>
       </footer>

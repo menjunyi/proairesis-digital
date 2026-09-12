@@ -154,18 +154,18 @@ export function LegalDocumentPage({
           <Link href="/" className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center overflow-hidden rounded-full bg-[#deeffc]">
               <span aria-hidden="true" className="text-xl font-semibold">
-                P
+                R
               </span>
             </span>
             <span className="text-xl font-semibold tracking-[-0.04em]">
-              Pip
+              RoleClue
             </span>
           </Link>
           <Link
             href="/"
             className="inline-flex items-center gap-2 text-sm font-semibold text-[#425e75] transition-colors hover:text-[#286b9e]"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Pip
+            <ArrowLeft className="h-4 w-4" /> Back to RoleClue
           </Link>
         </div>
       </header>
@@ -211,7 +211,7 @@ export function LegalDocumentPage({
 
       <footer className="bg-[#17324d] px-5 py-9 text-white/70 sm:px-8 lg:px-12">
         <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm">Pip legal and policy documents</p>
+          <p className="text-sm">RoleClue legal and policy documents</p>
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-bold">
             {legalLinks.map((item) => (
               <Link

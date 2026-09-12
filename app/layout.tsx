@@ -5,29 +5,30 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.SITE_URL ?? 'https://pip-job-search-au.junyimen.chatgpt.site',
   ),
-  title: 'Pip — Find the jobs you can actually pursue',
+  title: 'RoleClue — AI job search and eligibility checks for Australia',
   description:
-    'Your skills fit. Does the job? Explore work-rights, sponsorship, citizenship, clearance and location requirements for your next professional role in Australia, including applications from overseas.',
+    'RoleClue helps you check Australian job requirements, including work rights, sponsorship, citizenship, clearance and location, before preparing truthful applications.',
   openGraph: {
-    title: 'Pip — Find the jobs you can actually pursue',
+    siteName: 'RoleClue',
+    title: 'RoleClue — AI job search and eligibility checks for Australia',
     description:
       'Check the hard gates before you spend hours applying. Evidence-backed shortlists, truthful application drafts and human approval by design.',
     type: 'website',
     images: [
       {
-        url: '/og.png',
-        width: 1200,
-        height: 630,
-        alt: 'Pip — Find the jobs you can actually pursue',
+        url: '/og.png?v=roleclue',
+        width: 1731,
+        height: 909,
+        alt: 'RoleClue — AI job search and eligibility checks for Australia',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Pip — Find the jobs you can actually pursue',
+    title: 'RoleClue — AI job search and eligibility checks for Australia',
     description:
       'Eligibility first. Evidence on every decision. No auto-apply.',
-    images: ['/og.png'],
+    images: ['/og.png?v=roleclue'],
   },
 };
 

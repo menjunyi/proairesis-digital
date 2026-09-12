@@ -43,7 +43,7 @@ export async function POST(
       .prepare(`SELECT COUNT(*) AS total FROM users WHERE role = 'super_admin' AND status = 'active'`)
       .first<{ total: number }>();
     if (Number(count?.total ?? 0) <= 1) {
-      return Response.json({ error: 'Pip must retain at least one active super admin.' }, { status: 409 });
+      return Response.json({ error: 'RoleClue must retain at least one active super admin.' }, { status: 409 });
     }
   }
 

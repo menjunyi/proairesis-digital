@@ -29,7 +29,7 @@ export async function POST(
   const body = await readJsonObject(request);
   const stage = body?.stage as CrmStage;
   const priority = body?.priority as CrmPriority;
-  const source = cleanText(body?.source, 120) || 'Pip';
+  const source = cleanText(body?.source, 120) || 'RoleClue';
   const nextAction = cleanText(body?.nextAction, 240);
   const followUpInput = cleanText(body?.nextFollowUpAt, 40);
   const tags = Array.isArray(body?.tags)

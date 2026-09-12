@@ -132,7 +132,7 @@ function Brand() {
       </span>
       <span>
         <span className="block text-lg font-black leading-none tracking-[-0.04em] text-white">
-          Pip
+          RoleClue
         </span>
         <span className="mt-1 block text-[9px] font-black uppercase tracking-[0.18em] text-[#a9c1bf]">
           Admin centre
@@ -196,9 +196,9 @@ export function AdminConsole({
     const registration = modelContext.registerTool(
       {
         name: 'find_b2c_users',
-        title: 'Find Pip B2C users',
+        title: 'Find RoleClue B2C users',
         description:
-          'Search the protected Pip B2C user directory by name, email, user ID or assigned consultant and show matching accounts.',
+          'Search the protected RoleClue B2C user directory by name, email, user ID or assigned consultant and show matching accounts.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -434,7 +434,7 @@ export function AdminConsole({
               </h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[#587174]">
                 {activeView === 'Overview'
-                  ? 'A clear view of Pip’s people, service delivery and actions that need your attention.'
+                  ? 'A clear view of RoleClue’s people, service delivery and actions that need your attention.'
                   : activeView === 'Tasks'
                     ? 'Manage personal, relationship, company and project work as one connected system.'
                     : activeView === 'Agents'
@@ -443,7 +443,7 @@ export function AdminConsole({
                         ? 'Run your contact pipeline, relationship history, and follow-up work from one place.'
                         : activeView === 'Commissions'
                           ? 'Set lead and sales commission splits, attribute conversions, and control payout readiness.'
-                          : `Manage ${activeView.toLowerCase()} across the Pip platform.`}
+                          : `Manage ${activeView.toLowerCase()} across the RoleClue platform.`}
               </p>
             </div>
             {!['Tasks', 'Agents'].includes(activeView) ? (
@@ -1290,7 +1290,7 @@ function SectionContent({
         <SettingsCard
           icon={ShieldCheck}
           title="Admin security"
-          body="Super admins authenticate with ChatGPT, are checked against a server-side allowlist, and must remain active in Pip."
+          body="Super admins authenticate with ChatGPT, are checked against a server-side allowlist, and must remain active in RoleClue."
           items={[
             'Deny-by-default role checks',
             'At least one active super admin',
@@ -1681,7 +1681,7 @@ function InviteForm({
     <form onSubmit={submit}>
       <FormShell
         eyebrow="New account"
-        title="Invite someone to Pip"
+        title="Invite someone to RoleClue"
         description="Create a B2C candidate account or start a consultant review."
         submitLabel="Create invitation"
         busy={busy}
