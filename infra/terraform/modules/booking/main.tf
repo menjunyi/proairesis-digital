@@ -32,6 +32,8 @@ resource "aws_lambda_function" "booking" {
   memory_size      = 128
   environment { variables = { DEPLOYMENT_ENV = var.environment, SITE_ORIGIN = var.site_origin, BOOKING_BRIDGE_URL = var.bridge_url, BOOKING_SECRET_PARAMETER = var.secret_parameter } }
   depends_on = [aws_iam_role_policy.booking]
+  # GitHub promotes tested handler artifacts after Terraform bootstraps the function.
+  lifecycle { ignore_changes = [filename, source_code_hash] }
 }
 resource "aws_apigatewayv2_api" "booking" {
   name          = "roleclue-${var.environment}-booking"
