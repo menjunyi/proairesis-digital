@@ -24,7 +24,7 @@ export function BookingCalendar() {
   const [email,setEmail]=useState('');
   const [testMode,setTestMode]=useState(false);
   const [refresh,setRefresh]=useState(0);
-  useEffect(()=>{const id=setTimeout(()=>{const d=sydneyDay();setToday(d);setDate(d);setMonth(d.slice(0,7));},0);return()=>clearTimeout(id);},[]);
+  useEffect(()=>{const id=setTimeout(()=>{const d=sydneyDay();const tomorrow=new Date(d+'T12:00:00Z');tomorrow.setUTCDate(tomorrow.getUTCDate()+1);const selected=tomorrow.toISOString().slice(0,10);setToday(d);setDate(selected);setMonth(selected.slice(0,7));},0);return()=>clearTimeout(id);},[]);
   useEffect(()=>{
     if(!date)return;
     const controller=new AbortController();
