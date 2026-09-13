@@ -25,7 +25,7 @@ try{
  if(!present.includes('true'))command(['click','button[aria-label="Next month"]']);
  command(['click',`button[aria-label="${label}"]`]);command(['wait','--fn',"Boolean(document.querySelector('.booking-slot-grid button') || document.querySelector('.booking-status')?.textContent.includes('No times'))"]);
  if(environment==='staging'){
-  command(['click','.booking-slot-grid button:first-child']);command(['click','.booking-bottom .booking-primary']);command(['wait','--fn',"Boolean(document.querySelector('input[name=name]'))"]);
+  command(['wait','--fn',"document.querySelector('.booking-times')?.getAttribute('aria-busy')==='false' && Boolean(document.querySelector('.booking-slot-grid button'))"]);command(['click','.booking-slot-grid button:first-child']);command(['wait','--fn',"document.querySelector('.booking-bottom .booking-primary')?.disabled===false"]);command(['click','.booking-bottom .booking-primary']);command(['wait','--fn',"Boolean(document.querySelector('input[name=name]'))"]);
   command(['fill','input[name=name]','Release Test']);command(['fill','input[name=email]','release-test@example.com']);command(['check','input[name=consent]']);command(['click','.booking-form .booking-primary']);command(['wait','--fn',"Boolean(document.querySelector('.booking-success'))"]);
   const status=command(['eval','--stdin'],"document.querySelector('.booking-success').textContent.includes('No invitation')");if(!status.includes('true'))throw Error('Staging did not visibly identify test confirmation');
  }

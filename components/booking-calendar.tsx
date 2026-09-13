@@ -28,18 +28,20 @@ export function BookingCalendar() {
   useEffect(()=>{
     if(!date)return;
     const controller=new AbortController();
-    const reset=setTimeout(()=>{setLoading(true);setError('');setSlots([]);setSlot('');},0);
     fetch(`/api/booking/availability?date=${date}`,{signal:controller.signal,cache:'no-store'})
-      .then(async r=>{const data: unknown=await r.json();if(!data || typeof data!=='object')throw new Error('Invalid calendar response.');if(!r.ok)throw new Error('error' in data && typeof data.error==='string'?data.error:'Unable to load availability.');if(!('slots' in data) || !Array.isArray(data.slots) || !data.slots.every((value: unknown)=>typeof value==='string' && Number.isFinite(Date.parse(value))))throw new Error('Invalid calendar availability.');setSlots(data.slots);setTestMode('testMode' in data && data.testMode===true);})
-      .catch(e=>{if(e.name!=='AbortError')setError(e.message || 'Unable to load availability. Please try again.');})
+      .then(async r=>{const data: unknown=await r.json();if(!data || typeof data!=='object')throw new Error('Invalid calendar response.');if(!r.ok)throw new Error('error' in data && typeof data.error==='string'?data.error:'Unable to load availability.');if(!('slots' in data) || !Array.isArray(data.slots) || !data.slots.every((value: unknown)=>typeof value==='string' && Number.isFinite(Date.parse(value))))throw new Error('Invalid calendar availability.');if(!controller.signal.aborted){setSlots(data.slots);setTestMode('testMode' in data && data.testMode===true);}})
+      .catch(e=>{if(!controller.signal.aborted&&e.name!=='AbortError')setError(e.message || 'Unable to load availability. Please try again.');})
       .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
-    return ()=>{clearTimeout(reset);controller.abort();};
+    return ()=>controller.abort();
   },[date,refresh]);
   const maxDay=today?new Date(Date.parse(today+'T12:00:00Z')+60*86400000).toISOString().slice(0,10):'';
   const [year,mon]=month.split('-').map(Number);
   const utcDate=(y:number,m:number,d:number)=>new Date(`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}T12:00:00Z`);
   const days=month?new Date(new Date(month+'-01T12:00:00Z').getUTCFullYear(),mon,0).getDate():0;
   const padding=month?(utcDate(year,mon-1,1).getUTCDay()+6)%7:0;
+  function resetAvailability(){setLoading(true);setError('');setSlots([]);setSlot('');}
+  function chooseDate(value:string){if(value===date)return;resetAvailability();setDate(value);}
+  function reloadAvailability(){resetAvailability();setRefresh(x=>x+1);}
   function moveMonth(delta:number){const next=new Date(month+'-01T12:00:00Z');next.setUTCMonth(next.getUTCMonth()+delta);setMonth(next.toISOString().slice(0,7));}
   async function confirm(event:React.SyntheticEvent<HTMLFormElement>){
     event.preventDefault(); if(submitting)return;
@@ -68,17 +70,17 @@ export function BookingCalendar() {
           <div className="booking-picker">
             <div className="booking-month">
               <div className="booking-month-heading"><h3>{month?new Intl.DateTimeFormat('en-AU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(month+'-01T12:00:00Z')):'Loading calendar…'}</h3><div><button type="button" aria-label="Previous month" disabled={!month || month<=today.slice(0,7)} onClick={()=>moveMonth(-1)}><ChevronLeft size={18}/></button><button type="button" aria-label="Next month" disabled={!month || month>=maxDay.slice(0,7)} onClick={()=>moveMonth(1)}><ChevronRight size={18}/></button></div></div>
-              <div className="booking-days">{['M','T','W','T','F','S','S'].map((d,i)=><span className="booking-weekday" key={i}>{d}</span>)}{Array.from({length:padding},(_,i)=><span key={'pad'+i}/>)}{Array.from({length:days},(_,i)=>{const value=`${month}-${String(i+1).padStart(2,'0')}`;return <button type="button" key={value} disabled={value<today || value>maxDay} aria-label={dateLabel(value)} aria-pressed={date===value} className={date===value?'selected':''} onClick={()=>setDate(value)}>{i+1}</button>;})}</div>
+              <div className="booking-days">{['M','T','W','T','F','S','S'].map((d,i)=><span className="booking-weekday" key={i}>{d}</span>)}{Array.from({length:padding},(_,i)=><span key={'pad'+i}/>)}{Array.from({length:days},(_,i)=>{const value=`${month}-${String(i+1).padStart(2,'0')}`;return <button type="button" key={value} disabled={value<today || value>maxDay} aria-label={dateLabel(value)} aria-pressed={date===value} className={date===value?'selected':''} onClick={()=>chooseDate(value)}>{i+1}</button>;})}</div>
               <p className="booking-timezone"><Globe2 size={14}/>Australia / Sydney<br/><span>Daylight saving adjusts automatically.</span></p>
             </div>
             <div className="booking-times" aria-busy={loading}>
               <h3>{date?new Intl.DateTimeFormat('en-AU',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'}).format(new Date(date+'T12:00:00Z')):'Available times'}</h3>
-              {loading?<p className="booking-status" role="status">Checking the calendar…</p>:error?<div className="booking-status" role="status"><p>{error}</p><button type="button" className="booking-retry" onClick={()=>setRefresh(x=>x+1)}>Try again</button></div>:slots.length?<div className="booking-slot-grid">{slots.map(s=><button type="button" key={s} className={slot===s?'selected':''} aria-pressed={slot===s} onClick={()=>setSlot(s)}>{timeLabel(s)}</button>)}</div>:<p className="booking-status" role="status">No times available on this day. Please choose another date.</p>}
+              {loading?<p className="booking-status" role="status">Checking the calendar…</p>:error?<div className="booking-status" role="status"><p>{error}</p><button type="button" className="booking-retry" onClick={reloadAvailability}>Try again</button></div>:slots.length?<div className="booking-slot-grid">{slots.map(s=><button type="button" key={s} className={slot===s?'selected':''} aria-pressed={slot===s} onClick={()=>setSlot(s)}>{timeLabel(s)}</button>)}</div>:<p className="booking-status" role="status">No times available on this day. Please choose another date.</p>}
             </div>
           </div>
           <div className="booking-bottom"><p>{slot?<>{timeLabel(slot)} · 30 min<br/><span>Sydney time</span></>:'Choose a time to continue.'}</p><button type="button" className="booking-primary" disabled={!slot || loading} onClick={()=>{setError('');setStep(2);}}>Continue <ArrowRight size={17}/></button></div>
         </> : <>
-          <button type="button" className="booking-back" disabled={submitting} onClick={()=>{setStep(1);setRefresh(x=>x+1);}}><ArrowLeft size={16}/>Change date or time</button><h2>A few details, then we’re set.</h2><p className="booking-selection">{dateLabel(date)} · {timeLabel(slot)}<br/><span>30 minutes · Sydney time</span></p>
+          <button type="button" className="booking-back" disabled={submitting} onClick={()=>{setStep(1);reloadAvailability();}}><ArrowLeft size={16}/>Change date or time</button><h2>A few details, then we’re set.</h2><p className="booking-selection">{dateLabel(date)} · {timeLabel(slot)}<br/><span>30 minutes · Sydney time</span></p>
           <form onSubmit={confirm} className="booking-form"><label>Your name<input name="name" autoComplete="name" required maxLength={100} disabled={submitting}/></label><label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} disabled={submitting}/></label><div hidden><label>Website<input name="website" tabIndex={-1} autoComplete="off"/></label></div><label className="booking-consent"><input name="consent" type="checkbox" required disabled={submitting}/><span>Send me a calendar invitation and use these details to arrange this conversation. <a href="/privacy">Privacy policy</a></span></label>{error&&<p className="booking-error" role="alert">{error}</p>}<button className="booking-primary" disabled={submitting}>{submitting?'Confirming…':'Confirm booking'} <ArrowRight size={17}/></button><p className="booking-small">Your time is reserved only after confirmation.</p></form>
         </>}
       </>}
