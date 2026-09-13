@@ -22,3 +22,5 @@ output "budget_name" {
   value = module.budget.budget_name
 }
 
+
+output "booking_function" { value = module.booking.function_name }

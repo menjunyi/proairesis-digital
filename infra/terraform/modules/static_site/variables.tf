@@ -53,3 +53,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "booking_api_domain" {
+  type    = string
+  default = ""
+}

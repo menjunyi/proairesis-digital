@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { sites } from '@openai/sites-vite-plugin';
 import tailwindcss from '@tailwindcss/postcss';
 import vinext from 'vinext';
@@ -34,7 +35,21 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
+  // Local development reads its booking key from Keychain; deployments use
+  // hosted secrets. Never put this value in browser defines or build output.
+  const bookingVars: Record<string, string> = {};
+  if (command === 'serve' && process.platform === 'darwin') {
+    try {
+      bookingVars.BOOKING_BRIDGE_SECRET = process.env.BOOKING_BRIDGE_SECRET || execFileSync(
+        '/usr/bin/security', ['find-generic-password', '-a', 'booking-bridge', '-s', 'digital.proairesis.roleclue.booking', '-w'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
+      bookingVars.BOOKING_BRIDGE_URL = process.env.BOOKING_BRIDGE_URL || 'https://script.google.com/macros/s/AKfycbyFErae9Ip_PR1VjCAtayI0Z_lif8lZ1YexlbyjKLpaaOSX9miTnrQw8bFbo7MN_wjnlw/exec';
+    } catch {
+      // The booking API reports disconnected if local credentials are absent.
+    }
+  }
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= 'false';
@@ -54,7 +69,7 @@ export default defineConfig(async () => {
       sites(),
       cloudflare({
         viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-        config: localBindingConfig,
+        config: { ...localBindingConfig, ...(Object.keys(bookingVars).length ? { vars: bookingVars } : {}) },
       }),
     ],
   };

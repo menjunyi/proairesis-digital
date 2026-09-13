@@ -1,0 +1,93 @@
+name: Promote tested release to production
+on:
+  workflow_dispatch:
+    inputs:
+      staging_run_id:
+        description: Successful main staging run ID (also use a previous successful run to roll back)
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Validate staging run provenance
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.staging_run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" > run.json
+          jq -e --arg repo "$REPOSITORY" '.conclusion == "success" and .head_branch == "main" and .head_repository.full_name == $repo and .path == ".github/workflows/release.yml" and (.event == "push" or .event == "workflow_dispatch")' run.json
+          echo "sha=$(jq -r .head_sha run.json)" >> "$GITHUB_OUTPUT"
+  production:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://proairesis.digital
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.validate.outputs.source }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm install -g agent-browser@0.27.0
+      - run: agent-browser install --with-deps
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: roleclue-bundle
+          path: release/bundle
+          run-id: ${{ inputs.staging_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: staging-evidence
+          path: release/staging-evidence
+          run-id: ${{ inputs.staging_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify exact source and staging evidence before AWS access
+        env:
+          EXPECTED_SOURCE: ${{ needs.validate.outputs.source }}
+        run: |
+          node --input-type=module <<'JS'
+          import {readFile} from 'node:fs/promises';
+          import {verify} from './scripts/release/bundle.mjs';
+          const m=await verify('release/bundle');
+          const e=JSON.parse(await readFile('release/staging-evidence/smoke.json'));
+          if(m.source!==process.env.EXPECTED_SOURCE || e.source!==m.source || e.bundleDigest!==m.digest || e.passed!==true || e.environment!=='staging')throw Error('Staging evidence mismatch');
+          JS
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-southeast-2
+          allowed-account-ids: '037169690315'
+          role-session-name: GitHub-${{ github.run_id }}
+      - name: Promote the same bundle and verify production
+        env:
+          SITE_BUCKET: ${{ vars.SITE_BUCKET }}
+          CLOUDFRONT_ID: ${{ vars.CLOUDFRONT_ID }}
+          BOOKING_FUNCTION: roleclue-production-booking
+        run: node scripts/release/deploy.mjs production
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-evidence
+          path: release/evidence/
+          if-no-files-found: error
+          retention-days: 90

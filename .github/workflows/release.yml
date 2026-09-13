@@ -1,0 +1,82 @@
+name: Test and release staging
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: '1.11.4'
+      - run: terraform fmt -check -recursive infra/terraform
+      - name: Validate environment infrastructure without credentials
+        run: |
+          for environment in staging production cicd; do
+            terraform -chdir=infra/terraform/environments/$environment init -backend=false -input=false
+            terraform -chdir=infra/terraform/environments/$environment validate
+          done
+      - run: npm run release:build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: roleclue-bundle
+          path: release/bundle/
+          if-no-files-found: error
+          retention-days: 30
+  staging:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://staging.proairesis.digital
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm install -g agent-browser@0.27.0
+      - run: agent-browser install --with-deps
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: roleclue-bundle
+          path: release/bundle
+      - uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-southeast-2
+          allowed-account-ids: '037169690315'
+          role-session-name: GitHub-${{ github.run_id }}
+      - name: Deploy and verify staging
+        env:
+          SITE_BUCKET: ${{ vars.SITE_BUCKET }}
+          CLOUDFRONT_ID: ${{ vars.CLOUDFRONT_ID }}
+          BOOKING_FUNCTION: roleclue-staging-booking
+        run: node scripts/release/deploy.mjs staging
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: staging-evidence
+          path: release/evidence/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,10 +1,11 @@
+/* Public screenshots are deliberately unoptimised static export assets. */
+/* eslint-disable next/no-img-element */
 import { RoleClueMark } from '@/components/roleclue-mark';
 import {
   ArrowDown,
   ArrowRight,
   ArrowUpRight,
   Check,
-  CheckCheck,
   CircleHelp,
   FileText,
   Globe2,
@@ -17,6 +18,8 @@ import Link from 'next/link';
 import './landing.css';
 import { getContactDetails } from '@/lib/contact';
 
+// Real screenshots captured from the founder’s working dashboard.
+const screenshotsReady = true;
 const checks = [
   'Work rights',
   'Sponsorship',
@@ -45,9 +48,11 @@ const steps = [
   },
 ];
 const questions = [
+  ['What do I get for booking a conversation?', 'Everyone who books a conversation with me will be invited to join RoleClue’s first group of users and receive one month of free usage. I’ll send your early-access invitation to the email address used for your booking.'],
+  ['Can I use RoleClue today?', 'RoleClue is a working personal project, not a publicly operating service yet. The screenshots show the system I use for my own search. Book a conversation to see the workflow, share your challenges and help shape what comes next.'],
   [
     'Who is RoleClue’s Australian job search for?',
-    'No. RoleClue is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
+    'RoleClue is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
   ],
   [
     'Can RoleClue help me assess jobs that may require visa sponsorship?',
@@ -84,7 +89,7 @@ export default function Home() {
       <header className="pip-header">
         <Brand />
         <nav aria-label="Main navigation">
-          <a href="#decisions">Why RoleClue</a>
+          <a href="#in-use">See it in use</a>
           <a href="#how">How it works</a>
           <a href="#contact">Contact</a>
           <a href="#questions">FAQs</a>
@@ -94,13 +99,13 @@ export default function Home() {
           href="/book"
           data-analytics-location="header"
         >
-          Book a conversation <ArrowUpRight size={16} />
+          Let’s talk <ArrowUpRight size={16} />
         </Link>
       </header>
       <section className="pip-hero pip-wrap" id="main-content">
         <div className="hero-heading">
           <p className="pip-eyebrow">
-            <span className="pixel-dot" /> AI job search · Australia
+            <span className="pixel-dot" /> Australian job search · In development
           </p>
           <h1>
             Find the jobs
@@ -114,45 +119,24 @@ export default function Home() {
           <p>
             Find the requirements that matter <strong>before you apply.</strong>{' '}
             RoleClue checks work rights, sponsorship, citizenship, clearance and
-            location—so you can focus on jobs worth your time.
+            location to help you spend less time filtering opportunities yourself and more time on applications worth pursuing.
           </p>
           <div className="pip-actions">
-            <a className="pip-button" href="#decisions">
-              See how RoleClue decides <ArrowDown size={17} />
-            </a>
-            <Link
-              className="pip-text-link"
-              href="/book"
-              data-analytics-location="hero"
-            >
-              Let’s talk <ArrowUpRight size={17} />
-            </Link>
+            <Link className="pip-button" href="/book" data-analytics-location="hero">Help shape what I build <ArrowUpRight size={17} /></Link>
+            <a className="pip-text-link" href="#in-use">See the real workflow <ArrowDown size={17} /></a>
           </div>
+          <p className="hero-stage-note">Book 30 minutes with me and tell me what you need. Your input will shape RoleClue, and I’ll build features around the needs of the people who book with me. 🎁 You’ll also get one month of free usage.</p>
           <p className="hero-audience">
             For professionals in Australia.
             <br />
             And those planning their next move here.
           </p>
         </div>
-        <div
-          className="signal-stage"
-          aria-label="Illustrative diagram: job requirements checked against your situation"
-        >
-          <div className="role-preview-heading"><span>YOUR NEXT MOVE, WITH EVIDENCE</span><RoleClueMark className="roleclue-mark" /></div>
-          <div className="role-preview-card">
-            <span className="role-preview-status positive"><CheckCheck size={24} /></span>
-            <div><h3>Worth a closer look</h3><p>“Applicants with valid Australian work rights welcome.”</p><span>Compare with your circumstances</span></div>
-          </div>
-          <div className="role-preview-card">
-            <span className="role-preview-status uncertain"><CircleHelp size={24} /></span>
-            <div><h3>Ask before you apply</h3><p>Sponsorship is not mentioned in the advertisement.</p><span>Confirm with the employer</span></div>
-          </div>
-          <div className="role-preview-card">
-            <span className="role-preview-status conflict"><X size={24} /></span>
-            <div><h3>A requirement conflicts</h3><p>“Australian citizenship required.”</p><span>A blocker if you are not a citizen</span></div>
-          </div>
-          <div className="role-preview-footer"><span>Illustrative examples, not live vacancies.</span><span className="preview-dots" aria-hidden="true">•••<br/>•••<br/>•••</span></div>
-        </div>
+        <figure className="live-hero-preview">
+          <div className="screen-label"><span className="pixel-dot" /> THE PROJECT I’M BUILDING <span>Real dashboard / in development</span></div>
+          {screenshotsReady ? <a href="#in-use"><img src="/screenshots/today-masked.png" width="1600" height="1100" alt="The working dashboard showing search totals, the application review queue and the next scheduled workflow." fetchPriority="high" /></a> : <div className="screenshot-pending">Discover opportunities. Check requirements. Track your next move.</div>}
+          <figcaption>This is the dashboard I use for my own Australian job search. It puts applications awaiting review and the next scheduled workflow up front, with discovery and retrieval details further down.</figcaption>
+        </figure>
         <div className="check-strip">
           <span>Checked before fit.</span>
           {checks.map((x) => (
@@ -162,6 +146,21 @@ export default function Home() {
             </span>
           ))}
         </div>
+      </section>
+      <section className="pip-section pip-wrap" id="in-use">
+        <div className="section-title"><p className="pip-eyebrow">01 / The project I’m building</p><h2>Built for my search.<br /><span>Shaped by yours.</span></h2><p>I built this because checking every promising job by hand takes time. The system gathers opportunities, flags requirements that may rule a role out, and shows what still needs my attention. These are real screens from my own search.</p></div>
+        {screenshotsReady ? <div className="screen-story">
+          {[
+            {image:'opportunities-v2', number:'01', height:1000, title:'Choose where to put your effort.', body:'With unsuitable roles out of the way, I can compare the remaining opportunities by fit, check flagged requirements and see which applications are ready for review. I decide what to pursue before spending time on the next application.', alt:'Real opportunity shortlist filtered to suitable roles, with fit scores, flagged requirements and ranked or prepared statuses.'},
+            {image:'applications-assessment', number:'02', width:1712, height:925, title:'See the reasoning before you apply.', body:'My real application workspace keeps the documents, personal fit assessment, blockers and timeline together. I can review the strengths and gaps before deciding whether to submit. Only the résumé preview is omitted here.', alt:'Real application workspace showing the personal fit assessment, blockers, timeline and application list; résumé preview omitted.'},
+          ].map(screen=><figure className="screen-story-card" key={screen.image}><figcaption><span className="screen-number">{screen.number}</span><div><h3>{screen.title}</h3><p>{screen.body}</p></div><a href={`/screenshots/${screen.image}.png`} target="_blank" rel="noopener noreferrer" aria-label={`Enlarge: ${screen.title}`}>Enlarge <ArrowUpRight size={16}/></a></figcaption><a href={`/screenshots/${screen.image}.png`} target="_blank" rel="noopener noreferrer" aria-label={`Open full screenshot: ${screen.title}`}><img src={`/screenshots/${screen.image}.png`} width={screen.width || 1600} height={screen.height} alt={screen.alt} loading="lazy" /></a></figure>)}
+        </div> : <div className="screenshot-pending light">A walkthrough of the working project is being prepared. Book a conversation to see it together.</div>}
+        <article className="assessment-walkthrough">
+          <div><p className="pip-eyebrow">A closer look / My own assessment</p><h3>The score is only<br/>the starting point.</h3><p>This is my assessment for a Mission Critical Azure Delivery Engineer role. It recognises my consultancy and Terraform experience, but flags gaps in deep Azure and SRE experience.</p><ul><li><strong>Personal fit:</strong> strengths and gaps explained in plain language.</li><li><strong>Blockers:</strong> this application currently has no open blockers. That does not mean every skill requirement is met.</li><li><strong>Timeline:</strong> the recorded creation event shows when this application entered the workflow.</li></ul><p className="pip-caption">A real system assessment of my profile, shared with my permission. It is not an employer’s assessment or evidence of an interview.</p></div>
+          <a href="/screenshots/assessment-detail-v2.png" target="_blank" rel="noopener noreferrer" aria-label="Enlarge my personal fit assessment, blockers and timeline"><img src="/screenshots/assessment-detail-v2.png" width="1280" height="1458" loading="lazy" alt="Close-up of my personal strengths and gaps, no open blockers, and application-created timeline entry on 12 September 2026."/></a>
+        </article>
+        {screenshotsReady && <p className="pip-caption">Real personal-workflow screenshots, captured 12 September 2026. My personal fit assessments, blocker status and timeline are shown. The résumé preview is omitted. Counts and assessments change as the search progresses; these screens are not evidence of employer responses.</p>}
+        <div className="walkthrough-invite"><p>Book a conversation. Join the first group of users and get one month free when you receive access.</p><Link className="pip-button" href="/book">Let’s talk <ArrowUpRight size={18}/></Link></div>
       </section>
       <section className="pip-section pip-wrap" id="decisions">
         <div className="section-title">
@@ -340,32 +339,6 @@ export default function Home() {
           </p>
         </div>
       </section>
-      <section className="data-section pip-wrap" aria-labelledby="data-title">
-        <div>
-          <p className="pip-eyebrow">03 / What the data shows</p>
-          <h2 id="data-title">
-            Eligibility deserves
-            <br />a place in your search.
-          </h2>
-          <p>
-            In an analysed dataset, more than a third of opportunities were
-            marked as failing an eligibility requirement.
-          </p>
-        </div>
-        <div className="data-stat">
-          <strong>
-            36.1<span>%</span>
-          </strong>
-          <span>352 of 976 opportunities</span>
-          <p>Marked as eligibility failures</p>
-        </div>
-        <p className="pip-caption data-footnote">
-          Data snapshot: 9 September 2026. A single search dataset with
-          automated classifications; not a representative labour-market sample
-          or evidence of hiring outcomes. Results vary with the profile and
-          sources used.
-        </p>
-      </section>
       <section className="pip-section pip-wrap" id="contact">
         <div className="pricing-layout">
           <div className="section-title">
@@ -381,18 +354,17 @@ export default function Home() {
               RoleClue could help.
             </p>
             <p className="pricing-context">
-              An introductory product conversation—not migration advice, a job
-              placement or a promise of sponsorship.
+              RoleClue is not operating as a public service yet. This is a conversation about the project and your needs, with no obligation to join.
             </p>
           </div>
           <article className="price-card">
             <div className="price-top">
-              <span>CONTACT & BOOKING</span>
+              <span>IN DEVELOPMENT · LET’S TALK</span>
               <ArrowUpRight size={22} />
             </div>
             <h3>Let’s talk about your job search.</h3>
             <p>
-              Reach me directly to arrange a time that works for both of us.
+              Book a 30-minute conversation to see the project and talk through your search. Available daily, 8 am–8 pm Sydney time.
             </p>
             <ul>
               {[
@@ -407,7 +379,7 @@ export default function Home() {
               ))}
             </ul>
             <Link className="pip-button" href="/book" data-analytics-location="contact">
-              Choose a date and time <ArrowUpRight size={18} />
+              Let’s talk — choose a time <ArrowUpRight size={18} />
             </Link>
             {email && (
               <p>
@@ -454,15 +426,15 @@ export default function Home() {
             See your next move.
           </h2>
           <div className="pip-actions">
-            <a className="pip-button light" href="#decisions">
-              Explore the decisions <ArrowRight size={18} />
-            </a>
+            <Link className="pip-button light" href="/book">
+              Let’s talk <ArrowUpRight size={18} />
+            </Link>
             <Link
               className="pip-text-link"
-              href="/book"
+              href="#in-use"
               data-analytics-location="footer"
             >
-              Talk about your search <ArrowUpRight size={18} />
+              See the project in use <ArrowRight size={18} />
             </Link>
           </div>
         </div>
@@ -487,7 +459,6 @@ export default function Home() {
             ['Refunds & Cancellation', '/refunds'],
             ['Cookies', '/cookies'],
             ['Disclaimer', '/disclaimer'],
-            ['Billing', '/billing'],
           ].map(([label, href]) => (
             <Link key={href} href={href}>
               {label}

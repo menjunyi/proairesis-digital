@@ -1,6 +1,6 @@
 /** A public scheduling link only; never a calendar API credential. */
 export function getBookingSchedule(): { url: string; embedUrl: string | null } | null {
-  const value = process.env.CONTACT_BOOKING_URL?.trim();
+  const value = (process.env.CONTACT_BOOKING_URL ?? 'https://calendar.google.com/calendar/appointments/schedules/AcZssZ3lm9q0zenb-oRZGNMVkdohsSqxLMBT57cjKzMwPkgn8C1if7SzQh5VxIJPbbUd-uCk9upNcKzI').trim();
   if (!value) return null;
   try {
     const url = new URL(value);

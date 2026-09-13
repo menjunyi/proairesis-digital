@@ -196,9 +196,8 @@ export function LegalDocumentPage({
           <div className="mb-10 flex gap-4 rounded-2xl border border-[#236451]/20 bg-[#d9eee3]/55 p-5 text-[#245c54]">
             <Scale className="mt-0.5 h-5 w-5 shrink-0" />
             <p className="text-sm font-bold leading-6">
-              Working draft: bracketed business details must be completed and
-              Australian and New Zealand lawyers should review this document
-              before launch.
+              These policies cover the current public website and free introductory
+              conversations. RoleClue is still in development; paid services are not available.
             </p>
           </div>
 
