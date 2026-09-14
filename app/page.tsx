@@ -32,19 +32,19 @@ const steps = [
     n: '01',
     icon: SlidersHorizontal,
     title: 'Start with your situation.',
-    body: 'Your work rights, sponsorship needs, preferred locations and experience. The details a CV match can miss.',
+    body: 'Set your citizenship, clearance, work rights and sponsorship needs, alongside your preferred locations and experience.',
   },
   {
     n: '02',
     icon: ScanLine,
-    title: 'See what the job really requires.',
-    body: 'RoleClue checks the wording, highlights the blockers and brings unclear conditions to your attention.',
+    title: 'Bring the requirements together.',
+    body: 'RoleClue aggregates job descriptions from supported sources, surfaces eligibility requirements and flags anything the listing leaves unclear.',
   },
   {
     n: '03',
     icon: FileText,
-    title: 'Put your effort in the right place.',
-    body: 'Choose a role worth pursuing. Prepare a tailored résumé and cover letter using your actual experience, then review and apply.',
+    title: 'Spend less time filtering.',
+    body: 'Review a shortlist shaped by your situation instead of reading every listing yourself. Check the source wording and any uncertain requirements before you decide.',
   },
 ];
 const questions = [
@@ -108,18 +108,19 @@ export default function Home() {
             <span className="pixel-dot" /> Australian job search · In development
           </p>
           <h1>
-            Find the jobs
+            Less reading.
             <br />
-            you can actually
+            Less filtering.
             <br />
-            <span>pursue.</span>
+            <span>More relevant jobs.</span>
           </h1>
         </div>
         <div className="hero-intro">
           <p>
-            Find the requirements that matter <strong>before you apply.</strong>{' '}
-            RoleClue checks work rights, sponsorship, citizenship, clearance and
-            location to help you spend less time filtering opportunities yourself and more time on applications worth pursuing.
+            Job descriptions in one place. <strong>Eligibility filters that save you time.</strong>{' '}
+            RoleClue brings together listings from supported sources and helps you
+            filter by citizenship, security clearance and sponsorship, so you spend
+            less time reading through jobs that don’t fit your situation.
           </p>
           <div className="pip-actions">
             <Link className="pip-button" href="/book" data-analytics-location="hero">Help shape what I build <ArrowUpRight size={17} /></Link>
@@ -171,9 +172,9 @@ export default function Home() {
             <span>Until the fine print.</span>
           </h2>
           <p>
-            You find a promising role. Then comes “citizenship required” or “no
-            sponsorship.” RoleClue brings those conditions to the surface before you
-            invest in an application.
+            When a job board’s filters don’t cover citizenship, clearance or
+            sponsorship, you’re left opening listings and checking each one.
+            RoleClue surfaces those requirements so you can narrow your search sooner.
           </p>
         </div>
         <div className="decision-grid">
