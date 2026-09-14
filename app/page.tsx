@@ -8,7 +8,6 @@ import {
   Check,
   CircleHelp,
   FileText,
-  Globe2,
   ScanLine,
   ShieldCheck,
   SlidersHorizontal,
@@ -21,11 +20,11 @@ import { getContactDetails } from '@/lib/contact';
 // Real screenshots captured from the founder’s working dashboard.
 const screenshotsReady = true;
 const checks = [
-  'Work rights',
-  'Sponsorship',
-  'Citizenship',
-  'Clearance',
-  'Location',
+  {name: 'Work rights', detail: 'Your right to work in Australia'},
+  {name: 'Sponsorship', detail: 'Whether you need it now or later'},
+  {name: 'Citizenship', detail: 'The citizenship you hold'},
+  {name: 'Clearance', detail: 'Your current security clearance'},
+  {name: 'Location', detail: 'Where you want to work'},
 ];
 const steps = [
   {
@@ -112,60 +111,45 @@ export default function Home() {
             <br />
             Less filtering.
             <br />
-            <span>More relevant jobs.</span>
+            <span>More <em className="slogan-accent">relevant</em> jobs.</span>
           </h1>
         </div>
         <div className="hero-intro">
           <p>
-            Job descriptions in one place. <strong>Eligibility filters that save you time.</strong>{' '}
-            RoleClue brings together listings from supported sources and helps you
-            filter by citizenship, security clearance and sponsorship, so you spend
-            less time reading through jobs that don’t fit your situation.
+            Jobs in one place. <strong>Filtered around you.</strong>{' '}
+            Choose your work rights, citizenship, clearance and sponsorship needs.
+            Spend less time reading unsuitable listings.
           </p>
           <div className="pip-actions">
-            <Link className="pip-button" href="/book" data-analytics-location="hero">Help shape what I build <ArrowUpRight size={17} /></Link>
-            <a className="pip-text-link" href="#in-use">See the real workflow <ArrowDown size={17} /></a>
+            <Link className="pip-button" href="/book" data-analytics-location="hero">Help shape RoleClue <ArrowUpRight size={17} /></Link>
+            <a className="pip-text-link" href="#in-use">Explore the features <ArrowDown size={17} /></a>
           </div>
-          <p className="hero-stage-note">Book 30 minutes with me and tell me what you need. Your input will shape RoleClue, and I’ll build features around the needs of the people who book with me. 🎁 You’ll also get one month of free usage.</p>
-          <p className="hero-audience">
-            For professionals in Australia.
-            <br />
-            And those planning their next move here.
-          </p>
-        </div>
-        <figure className="live-hero-preview">
-          <div className="screen-label"><span className="pixel-dot" /> THE PROJECT I’M BUILDING <span>Real dashboard / in development</span></div>
-          {screenshotsReady ? <a href="#in-use"><img src="/screenshots/today-masked.png" width="1600" height="1100" alt="The working dashboard showing search totals, the application review queue and the next scheduled workflow." fetchPriority="high" /></a> : <div className="screenshot-pending">Discover opportunities. Check requirements. Track your next move.</div>}
-          <figcaption>This is the dashboard I use for my own Australian job search. It puts applications awaiting review and the next scheduled workflow up front, with discovery and retrieval details further down.</figcaption>
-        </figure>
-        <div className="check-strip">
-          <span>Checked before fit.</span>
-          {checks.map((x) => (
-            <span key={x}>
-              <span className="tiny-cross">+</span>
-              {x}
-            </span>
-          ))}
+          <p className="hero-stage-note">Share what you need in a 30-minute chat. Join the first users and get one month free when access opens.</p>
         </div>
       </section>
+      <section className="founder-stats pip-wrap" aria-label="My job search in numbers">
+        <div className="founder-stats-heading"><p className="pip-eyebrow">MY JOB SEARCH, IN NUMBERS</p><span>Snapshot · 14 September 2026</span></div>
+        <dl>
+          <div><dt>Jobs filtered out</dt><dd>914</dd></div>
+          <div><dt>Applications submitted</dt><dd>18</dd></div>
+          <div><dt>Reached interview</dt><dd>1</dd></div>
+          <div><dt>Estimated reduction in manual screening</dt><dd>85%</dd></div>
+        </dl>
+        <p className="founder-stats-note">My personal tracker: jobs flagged for eligibility, language or location requirements. The interview is included in the 18 submissions.</p>
+      </section>
       <section className="pip-section pip-wrap" id="in-use">
-        <div className="section-title"><p className="pip-eyebrow">01 / The project I’m building</p><h2>Built for my search.<br /><span>Shaped by yours.</span></h2><p>I built this because checking every promising job by hand takes time. The system gathers opportunities, flags requirements that may rule a role out, and shows what still needs my attention. These are real screens from my own search.</p></div>
-        {screenshotsReady ? <div className="screen-story">
-          {[
-            {image:'opportunities-v2', number:'01', height:1000, title:'Choose where to put your effort.', body:'With unsuitable roles out of the way, I can compare the remaining opportunities by fit, check flagged requirements and see which applications are ready for review. I decide what to pursue before spending time on the next application.', alt:'Real opportunity shortlist filtered to suitable roles, with fit scores, flagged requirements and ranked or prepared statuses.'},
-            {image:'applications-assessment', number:'02', width:1712, height:925, title:'See the reasoning before you apply.', body:'My real application workspace keeps the documents, personal fit assessment, blockers and timeline together. I can review the strengths and gaps before deciding whether to submit. Only the résumé preview is omitted here.', alt:'Real application workspace showing the personal fit assessment, blockers, timeline and application list; résumé preview omitted.'},
-          ].map(screen=><figure className="screen-story-card" key={screen.image}><figcaption><span className="screen-number">{screen.number}</span><div><h3>{screen.title}</h3><p>{screen.body}</p></div><a href={`/screenshots/${screen.image}.png`} target="_blank" rel="noopener noreferrer" aria-label={`Enlarge: ${screen.title}`}>Enlarge <ArrowUpRight size={16}/></a></figcaption><a href={`/screenshots/${screen.image}.png`} target="_blank" rel="noopener noreferrer" aria-label={`Open full screenshot: ${screen.title}`}><img src={`/screenshots/${screen.image}.png`} width={screen.width || 1600} height={screen.height} alt={screen.alt} loading="lazy" /></a></figure>)}
-        </div> : <div className="screenshot-pending light">A walkthrough of the working project is being prepared. Book a conversation to see it together.</div>}
-        <article className="assessment-walkthrough">
-          <div><p className="pip-eyebrow">A closer look / My own assessment</p><h3>The score is only<br/>the starting point.</h3><p>This is my assessment for a Mission Critical Azure Delivery Engineer role. It recognises my consultancy and Terraform experience, but flags gaps in deep Azure and SRE experience.</p><ul><li><strong>Personal fit:</strong> strengths and gaps explained in plain language.</li><li><strong>Blockers:</strong> this application currently has no open blockers. That does not mean every skill requirement is met.</li><li><strong>Timeline:</strong> the recorded creation event shows when this application entered the workflow.</li></ul><p className="pip-caption">A real system assessment of my profile, shared with my permission. It is not an employer’s assessment or evidence of an interview.</p></div>
-          <a href="/screenshots/assessment-detail-v2.png" target="_blank" rel="noopener noreferrer" aria-label="Enlarge my personal fit assessment, blockers and timeline"><img src="/screenshots/assessment-detail-v2.png" width="1280" height="1458" loading="lazy" alt="Close-up of my personal strengths and gaps, no open blockers, and application-created timeline entry on 12 September 2026."/></a>
-        </article>
-        {screenshotsReady && <p className="pip-caption">Real personal-workflow screenshots, captured 12 September 2026. My personal fit assessments, blocker status and timeline are shown. The résumé preview is omitted. Counts and assessments change as the search progresses; these screens are not evidence of employer responses.</p>}
-        <div className="walkthrough-invite"><p>Book a conversation. Join the first group of users and get one month free when you receive access.</p><Link className="pip-button" href="/book">Let’s talk <ArrowUpRight size={18}/></Link></div>
+        <div className="section-title"><p className="pip-eyebrow">01 / Your search preferences</p><h2>Your filters.<br /><span>Your shortlist.</span></h2><p>Set your situation once. See relevant jobs and the requirements behind each match.</p></div>
+        <div className="eligibility-settings">
+          <h3>Choose what fits your situation.</h3>
+          <dl>{checks.map(({name,detail})=><div key={name}><dt><SlidersHorizontal size={17} aria-hidden="true" />{name}</dt><dd>{detail}</dd></div>)}</dl>
+          <p>Missing or unclear requirements stay flagged for you to check.</p>
+        </div>
+
+
       </section>
       <section className="pip-section pip-wrap" id="decisions">
         <div className="section-title">
-          <p className="pip-eyebrow">01 / The decision comes first</p>
+          <p className="pip-eyebrow">02 / Check the requirements</p>
           <h2>
             A great match.
             <br />
@@ -235,9 +219,20 @@ export default function Home() {
               </p>
             </div>
           </article>
+          <article className="decision-card skill-fit-card">
+            <div className="decision-state"><ScanLine size={19} /> Skill fit <span>03</span></div>
+            <div className="role-body">
+              <p className="role-meta">ILLUSTRATIVE ASSESSMENT · SOFTWARE ENGINEER</p>
+              <h3>See how your skills match.</h3>
+              <div className="skill-fit-score"><strong>82<span>%</span></strong><span>Estimated skill match</span></div>
+              <meter className="skill-fit-meter" aria-label="Illustrative skill match" value={82} min={0} max={100}>82%</meter>
+              <dl><div><dt>Strengths</dt><dd>Python, SQL and cloud experience</dd></div><div><dt>Gap to review</dt><dd>Production Kubernetes experience</dd></div></dl>
+              <p className="decision-note">An estimated match to the role’s skills—not your chance of getting hired. Eligibility requirements are checked separately.</p>
+            </div>
+          </article>
           <article className="decision-card positive">
             <div className="decision-state">
-              <Check size={19} /> Worth pursuing <span>03</span>
+              <Check size={19} /> Worth pursuing <span>04</span>
             </div>
             <div className="role-body">
               <p className="role-meta">ILLUSTRATIVE ROLE · SOFTWARE ENGINEER</p>
@@ -272,52 +267,13 @@ export default function Home() {
           of eligibility.
         </p>
       </section>
-      <section className="audience-section">
-        <div className="pip-wrap audience-inner">
-          <p className="pip-eyebrow">Built around your situation</p>
-          <h2>
-            Your next chapter.
-            <br />
-            Your real-world requirements.
-          </h2>
-          <div className="audience-grid">
-            <article>
-              <Globe2 />
-              <h3>Already in Australia</h3>
-              <p>
-                Find roles compatible with your current work rights, location
-                and plans for what comes next.
-              </p>
-              <span>Temporary residents · International graduates</span>
-            </article>
-            <article>
-              <ArrowUpRight />
-              <h3>Looking from overseas</h3>
-              <p>
-                Spot explicit sponsorship and relocation signals, and know when
-                you need to ask for more information.
-              </p>
-              <span>Skilled professionals · Sponsorship seekers</span>
-            </article>
-            <article>
-              <ShieldCheck />
-              <h3>Navigating hard requirements</h3>
-              <p>
-                Bring citizenship, clearance and workplace conditions into the
-                decision alongside your experience.
-              </p>
-              <span>Your skills are only part of the picture</span>
-            </article>
-          </div>
-        </div>
-      </section>
       <section className="pip-section pip-wrap" id="how">
         <div className="section-title">
-          <p className="pip-eyebrow">02 / A more considered search</p>
+          <p className="pip-eyebrow">03 / How it works</p>
           <h2>
-            Less second-guessing.
+            Set your filters.
             <br />
-            <span>More forward motion.</span>
+            <span>Review your matches.</span>
           </h2>
         </div>
         <div className="steps-grid">
@@ -332,6 +288,13 @@ export default function Home() {
             </article>
           ))}
         </div>
+        {screenshotsReady && <div className="screen-story feature-story">
+          {[
+            {image:'opportunities-v2', number:'01', height:1000, title:'Find jobs that fit your filters.', body:'Compare opportunities in one shortlist, with unsuitable roles filtered out and unclear requirements flagged.', alt:'Opportunity shortlist with fit scores and flagged requirements.'},
+            {image:'applications-assessment', number:'02', width:1712, height:925, title:'See why a role fits—or doesn’t.', body:'Review eligibility blockers, strengths and skill gaps alongside the job description before you apply.', alt:'Application assessment showing personal fit, blockers and a review timeline.'},
+          ].map(screen=><figure className="screen-story-card" key={screen.image}><figcaption><span className="screen-number">{screen.number}</span><div><h3>{screen.title}</h3><p>{screen.body}</p></div></figcaption><a href={`/screenshots/${screen.image}.png`} target="_blank" rel="noopener noreferrer" aria-label={`Enlarge: ${screen.title}`}><img src={`/screenshots/${screen.image}.png`} width={screen.width || 1600} height={screen.height} alt={screen.alt} loading="lazy" /></a></figure>)}
+        </div>}
+        <p className="pip-caption">Screens from the working prototype. Public access is in development.</p>
         <div className="control-note">
           <ShieldCheck size={22} />
           <p>
@@ -345,17 +308,16 @@ export default function Home() {
           <div className="section-title">
             <p className="pip-eyebrow">04 / Let’s talk</p>
             <h2>
-              Your search.
+              Your ideas.
               <br />
-              <span>A real conversation.</span>
+              <span>Let’s build them together.</span>
             </h2>
             <p>
-              Tell me about the roles you’re looking for and the requirements
-              getting in your way. We’ll talk through your situation and whether
-              RoleClue could help.
+              Tell me what would make your job search easier. We’ll shape the
+              features together, and I’ll build around what you need.
             </p>
             <p className="pricing-context">
-              RoleClue is not operating as a public service yet. This is a conversation about the project and your needs, with no obligation to join.
+              RoleClue is still in development. Join early and help decide what comes next.
             </p>
           </div>
           <article className="price-card">
@@ -363,15 +325,15 @@ export default function Home() {
               <span>IN DEVELOPMENT · LET’S TALK</span>
               <ArrowUpRight size={22} />
             </div>
-            <h3>Let’s talk about your job search.</h3>
+            <h3>Tell me what you want to build.</h3>
             <p>
-              Book a 30-minute conversation to see the project and talk through your search. Available daily, 8 am–8 pm Sydney time.
+              Bring your ideas to a 30-minute chat. Let’s turn your job-search frustrations into useful features.
             </p>
             <ul>
               {[
-                'Share your target roles and preferred locations',
-                'Discuss work-rights and sponsorship questions in job listings',
-                'See whether the eligibility-first approach fits your search',
+                'Tell me what’s missing from your current tools',
+                'Shape the filters and features you want',
+                'Try what I build and help improve it',
               ].map((x) => (
                 <li key={x}>
                   <Check size={16} />

@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.SITE_URL ?? 'https://pip-job-search-au.junyimen.chatgpt.site',
+    process.env.SITE_URL ?? 'https://proairesis.digital',
   ),
   title: 'RoleClue — AI job search and eligibility checks for Australia',
   description:

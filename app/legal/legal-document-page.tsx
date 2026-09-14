@@ -52,7 +52,7 @@ function MarkdownDocument({ source }: { source: string }) {
       blocks.push(
         <h1
           key={`h1-${index}`}
-          className="max-w-4xl text-4xl font-semibold leading-[1.02] tracking-[-0.055em] text-[#062f3b] sm:text-6xl"
+          className="max-w-4xl text-3xl font-semibold leading-[1.12] tracking-[-0.055em] text-[#062f3b] sm:text-5xl"
         >
           {renderInline(line.slice(2))}
         </h1>,
@@ -151,12 +151,12 @@ export function LegalDocumentPage({
   return (
     <main className="min-h-screen bg-[#fbf4e8] text-[#062f3b]">
       <header className="border-b border-[#062f3b]/10 bg-[#fbf4e8]/95 px-5 py-4 sm:px-8 lg:px-12">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
+        <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center overflow-hidden rounded-full bg-[#d9eee3]">
+            <span className="grid h-9 w-9 place-items-center">
               <RoleClueMark className="size-8 text-[#c34527]" />
             </span>
-            <span className="text-xl font-semibold tracking-[-0.04em]">
+            <span className="text-[28px] font-extrabold tracking-[-0.04em] text-[#c34527]">
               RoleClue
             </span>
           </Link>
@@ -173,13 +173,13 @@ export function LegalDocumentPage({
         aria-label="Legal documents"
         className="sticky top-0 z-10 border-b border-[#062f3b]/10 bg-[#fbf4e8]/95 px-5 py-3 backdrop-blur sm:px-8 lg:px-12"
       >
-        <div className="mx-auto flex max-w-6xl gap-2 overflow-x-auto">
+        <div className="mx-auto flex max-w-[1200px] flex-wrap gap-1 sm:gap-2">
           {legalLinks.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               aria-current={item.href === activeHref ? 'page' : undefined}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+              className={`shrink-0 rounded-full px-3 py-2 text-xs sm:text-sm font-semibold transition-colors ${
                 item.href === activeHref
                   ? 'bg-[#062f3b] text-white'
                   : 'text-[#526d70] hover:bg-[#f2e8d8] hover:text-[#062f3b]'
@@ -191,24 +191,24 @@ export function LegalDocumentPage({
         </div>
       </nav>
 
-      <div className="px-5 py-12 sm:px-8 sm:py-16 lg:px-12">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-10 flex gap-4 rounded-2xl border border-[#236451]/20 bg-[#d9eee3]/55 p-5 text-[#245c54]">
+      <div className="px-5 py-8 sm:px-8 sm:py-10 lg:px-12">
+        <div className="mx-auto max-w-[1200px]">
+          <div className="mb-6 flex gap-4 rounded-2xl border border-[#236451]/20 bg-[#d9eee3]/55 p-5 text-[#245c54]">
             <Scale className="mt-0.5 h-5 w-5 shrink-0" />
-            <p className="text-sm font-bold leading-6">
+            <p className="text-sm font-medium leading-6">
               These policies cover the current public website and free introductory
               conversations. RoleClue is still in development; paid services are not available.
             </p>
           </div>
 
-          <article className="rounded-[2rem] border border-[#062f3b]/10 bg-[#ffffff] px-6 py-9 shadow-[0_24px_70px_rgba(45,91,126,0.07)] sm:px-10 sm:py-12 lg:px-16">
+          <article className="rounded-[20px] border border-[#062f3b]/10 bg-[#fffaf2] px-6 py-7 sm:px-10 sm:py-9 lg:px-12">
             <MarkdownDocument source={source} />
           </article>
         </div>
       </div>
 
       <footer className="bg-[#062f3b] px-5 py-9 text-white/70 sm:px-8 lg:px-12">
-        <div className="mx-auto flex max-w-6xl flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-[1200px] flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm">RoleClue legal and policy documents</p>
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-bold">
             {legalLinks.map((item) => (

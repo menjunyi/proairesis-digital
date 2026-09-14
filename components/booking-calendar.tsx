@@ -55,12 +55,10 @@ export function BookingCalendar() {
   return <div className="booking-shell">
     <aside className="booking-intro">
       <p className="booking-kicker"><span aria-hidden="true">👋 </span>LET’S TALK</p>
-      <h1>Your search.<br/><em>A real conversation.</em></h1>
-      <p className="booking-description">Tell me where your job search gets stuck. We’ll look at the roles you want, the requirements in your way, and whether RoleClue could help.</p>
-      <div className="booking-early-access"><strong><span aria-hidden="true">🎁 </span>Be one of the first. Get one month free.</strong><p>Book a conversation with me and you’ll be invited to join RoleClue’s first group of users.</p><p>I’ll send your early-access invitation to the email address you use for this booking.</p></div>
+      <h1>Your ideas.<br/><em>Let’s talk.</em></h1>
+      <p className="booking-description">Tell me what would make your job search easier. We’ll shape the features together.</p>
+      <div className="booking-early-access"><strong><span aria-hidden="true">🎁 </span>Help shape RoleClue. Get one month free.</strong><p>Your early-access invitation will go to your booking email when access opens.</p></div>
       <ul className="booking-facts"><li><Clock3 size={18}/>30 minutes</li><li><Video size={18}/>Online conversation</li><li><Globe2 size={18}/>Sydney time · 8 am–8 pm daily</li></ul>
-      <div className="booking-person"><span className="booking-avatar" aria-hidden="true">✦</span><div><strong>RoleClue</strong><span>A working project, shaped by real searches.</span></div></div>
-      <p className="booking-small">No preparation needed. Bring your ideas and questions — I’d love to hear them.</p>
     </aside>
     <section className="booking-panel" aria-label="Book a conversation">
       {confirmed ? <div className="booking-success" role="status"><span className="booking-success-icon"><Check size={32}/></span><p className="booking-kicker">YOU’RE BOOKED</p><h2>See you soon! <span aria-hidden="true">🎉</span></h2><p>{dateLabel(date)}<br/>{timeLabel(slot)} · Sydney time</p><p>{testMode?<>Test booking complete. No invitation was sent and no real calendar time was reserved.</>:<>Your calendar invitation is on its way to <strong>{email}</strong>. Check it for the meeting details.</>}</p><a href="/" className="booking-primary">Back to RoleClue <ArrowRight size={17}/></a></div> : <>
