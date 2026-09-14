@@ -19,17 +19,17 @@ try{
   command(['fill','.opinion-form input[name=email]','release-test@example.com']);command(['fill','.opinion-form textarea','Release test: direct opinion message.']);command(['scrollintoview','.opinion-form button']);command(['click','.opinion-form button']);command(['wait','--text','Test message accepted. No email was sent.']);
  }
  command(['open',origin+'/?rc_campaign=release-smoke&rc_test=1']);
- command(['wait','--text','Help us understand interest in RoleClue?']);
+ command(['wait','--text','We use cookies to improve your browsing experience.']);
  const before=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-browser') === null");if(!before.includes('true'))throw Error('Analytics identifier exists before consent');
  command(['find','role','button','click','--name','No thanks']);
  command(['wait','--text','Cookie choices']);
  command(['find','role','button','click','--name','Cookie choices']);
- command(['wait','--text','Help us understand interest in RoleClue?']);
+ command(['wait','--text','We use cookies to improve your browsing experience.']);
  command(['find','role','button','click','--name','Allow cookies']);
  command(['wait','--text','Cookie choices']);
  const consent=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-consent') === 'accepted'");if(!consent.includes('true'))throw Error('Analytics choice was not saved');
  command(['find','role','button','click','--name','Cookie choices']);
- command(['wait','--text','Help us understand interest in RoleClue?']);
+ command(['wait','--text','We use cookies to improve your browsing experience.']);
  command(['find','role','button','click','--name','No thanks']);
  command(['open',origin]);for(const [width,height]of [[1440,1000],[390,844]]){command(['set','viewport',String(width),String(height)]);const result=command(['eval','--stdin'],'document.documentElement.scrollWidth <= window.innerWidth');if(!result.includes('true'))throw Error(`Horizontal overflow at ${width}`);}
 }finally{command(['close']);}
