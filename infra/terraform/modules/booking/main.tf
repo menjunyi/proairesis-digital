@@ -30,7 +30,7 @@ resource "aws_lambda_function" "booking" {
   runtime          = "nodejs22.x"
   timeout          = 29
   memory_size      = 128
-  environment { variables = { DEPLOYMENT_ENV = var.environment, SITE_ORIGIN = var.site_origin, BOOKING_BRIDGE_URL = var.bridge_url, BOOKING_SECRET_PARAMETER = var.secret_parameter } }
+  environment { variables = { DEPLOYMENT_ENV = var.environment, SITE_ORIGIN = var.site_origin, BOOKING_BRIDGE_URL = var.bridge_url, BOOKING_SECRET_PARAMETER = var.secret_parameter, OPINION_TABLE = aws_dynamodb_table.opinions.name } }
   depends_on = [aws_iam_role_policy.booking]
   # GitHub promotes tested handler artifacts after Terraform bootstraps the function.
   lifecycle { ignore_changes = [filename, source_code_hash] }
@@ -46,7 +46,7 @@ resource "aws_apigatewayv2_integration" "booking" {
   payload_format_version = "2.0"
 }
 resource "aws_apigatewayv2_route" "booking" {
-  for_each  = toset(["GET /api/booking/availability", "POST /api/booking/confirm"])
+  for_each  = toset(["GET /api/booking/availability", "POST /api/booking/confirm", "POST /api/booking/message"])
   api_id    = aws_apigatewayv2_api.booking.id
   route_key = each.value
   target    = "integrations/${aws_apigatewayv2_integration.booking.id}"
@@ -70,3 +70,26 @@ resource "aws_lambda_permission" "gateway" {
 }
 output "domain" { value = replace(aws_apigatewayv2_api.booking.api_endpoint, "https://", "") }
 output "function_name" { value = aws_lambda_function.booking.function_name }
+
+resource "aws_dynamodb_table" "opinions" {
+  name         = "roleclue-${var.environment}-opinion-requests"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+}
+resource "aws_iam_role_policy" "opinion_email" {
+  count = var.environment == "production" ? 1 : 0
+  role  = aws_iam_role.booking.id
+  name  = "opinion-email"
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["ses:SendEmail"], Resource = "arn:aws:ses:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:identity/hello@proairesis.digital", Condition = { StringEquals = { "ses:FromAddress" = "hello@proairesis.digital" }, "ForAllValues:StringEquals" = { "ses:Recipients" = ["hello@proairesis.digital"] } } },
+    { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"], Resource = aws_dynamodb_table.opinions.arn }
+  ] })
+}
