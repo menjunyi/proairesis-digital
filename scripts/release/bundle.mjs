@@ -17,10 +17,11 @@ const marker='https://release-origin.invalid';
 export async function build(){
  run('npm',['run','build'],{env:{...process.env,SITE_URL:marker}});
  run('npx',['vite','build','--config','scripts/release/booking.vite.ts']);
+ run('npx',['vite','build','--config','scripts/release/campaign.vite.ts']);
  process.env.SITE_URL=marker;
  const root=path.resolve('release/bundle');await rm(root,{recursive:true,force:true});await mkdir(root,{recursive:true});
  const worker=(await import(pathToFileURL(path.resolve('dist/server/index.js')).href)).default;
- const needed=new Set(['/booking-client.js']);
+ const needed=new Set(['/booking-client.js','/campaign-client.js']);
  for(const route of routes){
   const response=await worker.fetch(new Request(marker+route),{}, {waitUntil(){}});
   if(!response.ok)throw Error(`Render failed: ${route}`);
@@ -28,13 +29,15 @@ export async function build(){
   if(/href=["']\/(?:admin|billing|api)(?:[/"'#?])/.test(html))throw Error(`${route} exposes an excluded feature`);
   if(draft(html))throw Error(`${route} contains unpublished policy content`);
   html=html.replace('</head>',`<link rel="canonical" href="__SITE_ORIGIN__${route==='/'?'/':route}"/><meta name="robots" content="__ROBOTS__"/><meta name="release-environment" content="__ENVIRONMENT__"/></head>`);
+  html=html.replace('</body>','<div id="campaign-analytics"></div><script src="/campaign-client.js" defer></script></body>');
   if(route==='/book')html=html.replace('</body>','<script src="/booking-client.js" defer></script></body>');
   const file=route==='/'?'index.html':route.slice(1)+'/index.html';await mkdir(path.dirname(path.join(root,file)),{recursive:true});await writeFile(path.join(root,file),html);
   for(const [,ref]of html.matchAll(/(?:href|src)=["']([^"']+)["']/g)){if(ref.startsWith('/')&&!ref.startsWith('//')){const pathname=ref.split(/[?#]/)[0];if(pathname&&!routes.includes(pathname))needed.add(pathname);}}
  }
  // Copy only assets reachable from public pages and their stylesheets.
- for(const ref of needed){const rel=safePath(decodeURIComponent(ref.slice(1)));const src=rel==='booking-client.js'?'release/client/booking-client.js':path.join('dist/client',rel);const data=await readFile(src);await mkdir(path.dirname(path.join(root,rel)),{recursive:true});await cp(src,path.join(root,rel));if(rel.endsWith('.css'))for(const [,url]of data.toString().matchAll(/url\(["']?([^)'"\s]+)["']?\)/g)){if(url.startsWith('/'))needed.add(url.split(/[?#]/)[0]);}}
+ for(const ref of needed){const rel=safePath(decodeURIComponent(ref.slice(1)));const src=rel==='campaign-client.js'?'release/campaign-client/campaign-client.js':rel==='booking-client.js'?'release/client/booking-client.js':path.join('dist/client',rel);const data=await readFile(src);await mkdir(path.dirname(path.join(root,rel)),{recursive:true});await cp(src,path.join(root,rel));if(rel.endsWith('.css'))for(const [,url]of data.toString().matchAll(/url\(["']?([^)'"\s]+)["']?\)/g)){if(url.startsWith('/'))needed.add(url.split(/[?#]/)[0]);}}
  await mkdir(path.join(root,'server'),{recursive:true});await cp('scripts/release/booking-handler.mjs',path.join(root,'server/booking-handler.mjs'));
+ await cp('scripts/release/campaign-handler.mjs',path.join(root,'server/campaign-handler.mjs'));
  await writeFile(path.join(root,'404.html'),'<!DOCTYPE html><html lang="en"><head><title>Page not found — RoleClue</title><meta name="robots" content="noindex"/></head><body><h1>Page not found</h1><a href="/">Return to RoleClue</a></body></html>');
  const source=process.env.GITHUB_SHA||spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
  const m=await writeManifest(root,{kind:'bundle',source,routes});console.log(JSON.stringify({bundleDigest:m.digest,source}));

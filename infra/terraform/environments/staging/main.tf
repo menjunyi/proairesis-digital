@@ -14,11 +14,12 @@ module "site" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  booking_api_domain = module.booking.domain
-  environment        = "staging"
-  site_hostname      = var.site_hostname
-  hosted_zone_id     = var.hosted_zone_id
-  tags               = local.tags
+  campaign_api_domain = module.campaigns.domain
+  booking_api_domain  = module.booking.domain
+  environment         = "staging"
+  site_hostname       = var.site_hostname
+  hosted_zone_id      = var.hosted_zone_id
+  tags                = local.tags
 }
 
 module "budget" {
@@ -37,4 +38,10 @@ module "booking" {
   site_origin      = "https://staging.proairesis.digital"
   bridge_url       = "https://script.google.com/macros/s/AKfycbyFErae9Ip_PR1VjCAtayI0Z_lif8lZ1YexlbyjKLpaaOSX9miTnrQw8bFbo7MN_wjnlw/exec"
   secret_parameter = "/roleclue/staging/booking/bridge-secret"
+}
+
+module "campaigns" {
+  source      = "../../modules/campaigns"
+  environment = "staging"
+  site_origin = "https://staging.proairesis.digital"
 }

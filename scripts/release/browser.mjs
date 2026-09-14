@@ -17,6 +17,19 @@ try{
   command(['fill','input[name=name]','Release Test']);command(['fill','input[name=email]','release-test@example.com']);command(['check','input[name=consent]']);command(['scrollintoview','.booking-form .booking-primary']);command(['click','.booking-form .booking-primary']);command(['wait','--fn',"Boolean(document.querySelector('.booking-success'))"]);
   const status=command(['eval','--stdin'],"document.querySelector('.booking-success').textContent.includes('No invitation')");if(!status.includes('true'))throw Error('Staging did not visibly identify test confirmation');
  }
+ command(['open',origin+'/?rc_campaign=release-smoke&rc_test=1']);
+ command(['wait','--text','Help us understand interest in RoleClue?']);
+ const before=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-browser') === null");if(!before.includes('true'))throw Error('Analytics identifier exists before consent');
+ command(['find','role','button','click','--name','No thanks']);
+ command(['wait','--text','Analytics choices']);
+ command(['find','role','button','click','--name','Analytics choices']);
+ command(['wait','--text','Help us understand interest in RoleClue?']);
+ command(['find','role','button','click','--name','Allow analytics']);
+ command(['wait','--text','Analytics choices']);
+ const consent=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-consent') === 'accepted'");if(!consent.includes('true'))throw Error('Analytics choice was not saved');
+ command(['find','role','button','click','--name','Analytics choices']);
+ command(['wait','--text','Help us understand interest in RoleClue?']);
+ command(['find','role','button','click','--name','No thanks']);
  command(['open',origin]);for(const [width,height]of [[1440,1000],[390,844]]){command(['set','viewport',String(width),String(height)]);const result=command(['eval','--stdin'],'document.documentElement.scrollWidth <= window.innerWidth');if(!result.includes('true'))throw Error(`Horizontal overflow at ${width}`);}
 }finally{command(['close']);}
 }

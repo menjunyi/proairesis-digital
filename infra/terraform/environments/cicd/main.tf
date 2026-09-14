@@ -28,7 +28,7 @@ resource "aws_iam_role_policy" "deploy" {
     { Effect = "Allow", Action = ["s3:ListBucket", "s3:GetBucketLocation"], Resource = "arn:aws:s3:::${each.value.bucket}" },
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = "arn:aws:s3:::${each.value.bucket}/*" },
     { Effect = "Allow", Action = ["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"], Resource = "arn:aws:cloudfront::037169690315:distribution/${each.value.distribution}" },
-    { Effect = "Allow", Action = ["lambda:UpdateFunctionCode", "lambda:GetFunctionConfiguration", "lambda:GetFunction"], Resource = "arn:aws:lambda:ap-southeast-2:037169690315:function:roleclue-${each.key}-booking" }
+    { Effect = "Allow", Action = ["lambda:UpdateFunctionCode", "lambda:GetFunctionConfiguration", "lambda:GetFunction"], Resource = ["arn:aws:lambda:ap-southeast-2:037169690315:function:roleclue-${each.key}-booking", "arn:aws:lambda:ap-southeast-2:037169690315:function:roleclue-${each.key}-campaigns"] }
   ] })
 }
 output "roles" { value = { for name, role in aws_iam_role.deploy : name => role.arn } }

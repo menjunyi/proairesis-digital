@@ -58,3 +58,8 @@ variable "booking_api_domain" {
   type    = string
   default = ""
 }
+
+variable "campaign_api_domain" {
+  type    = string
+  default = ""
+}

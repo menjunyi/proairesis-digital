@@ -19,6 +19,10 @@ await mkdir('release/lambda',{recursive:true});await copyFile(`${bundle}/server/
 run('zip',['-j','-q','release/booking.zip','release/lambda/booking-handler.mjs']);
 aws(['lambda','update-function-code','--function-name',fn,'--zip-file','fileb://release/booking.zip']);
 run('aws',[...awsArgs,'lambda','wait','function-updated-v2','--function-name',fn]);
+await copyFile(`${bundle}/server/campaign-handler.mjs`,'release/lambda/campaign-handler.mjs');
+run('zip',['-j','-q','release/campaign.zip','release/lambda/campaign-handler.mjs']);
+aws(['lambda','update-function-code','--function-name',`roleclue-${environment}-campaigns`,'--zip-file','fileb://release/campaign.zip']);
+run('aws',[...awsArgs,'lambda','wait','function-updated-v2','--function-name',`roleclue-${environment}-campaigns`]);
 // Delete stale files only after all local and identity checks have passed.
 run('aws',[...awsArgs,'s3','sync',output,`s3://${bucket}/`,'--delete','--exclude','server/*','--exclude','manifest.json','--cache-control','public,max-age=300,must-revalidate','--only-show-errors']);
 run('aws',[...awsArgs,'s3','cp',`${output}/manifest.json`,`s3://${bucket}/manifest.json`,'--cache-control','no-store','--only-show-errors']);

@@ -191,6 +191,31 @@ resource "aws_cloudfront_distribution" "site" {
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     }
   }
+  dynamic "origin" {
+    for_each = var.campaign_api_domain == "" ? [] : [var.campaign_api_domain]
+    content {
+      domain_name = origin.value
+      origin_id   = "campaign-api"
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
+    }
+  }
+  dynamic "ordered_cache_behavior" {
+    for_each = var.campaign_api_domain == "" ? [] : ["/r/*", "/api/campaigns/*"]
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "campaign-api"
+      viewer_protocol_policy   = "redirect-to-https"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+      origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    }
+  }
   default_cache_behavior {
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD", "OPTIONS"]
