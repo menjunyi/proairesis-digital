@@ -22,13 +22,13 @@ try{
  command(['wait','--text','Help us understand interest in RoleClue?']);
  const before=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-browser') === null");if(!before.includes('true'))throw Error('Analytics identifier exists before consent');
  command(['find','role','button','click','--name','No thanks']);
- command(['wait','--text','Analytics choices']);
- command(['find','role','button','click','--name','Analytics choices']);
+ command(['wait','--text','Cookie choices']);
+ command(['find','role','button','click','--name','Cookie choices']);
  command(['wait','--text','Help us understand interest in RoleClue?']);
- command(['find','role','button','click','--name','Allow analytics']);
- command(['wait','--text','Analytics choices']);
+ command(['find','role','button','click','--name','Allow cookies']);
+ command(['wait','--text','Cookie choices']);
  const consent=command(['eval','--stdin'],"localStorage.getItem('roleclue-campaign-consent') === 'accepted'");if(!consent.includes('true'))throw Error('Analytics choice was not saved');
- command(['find','role','button','click','--name','Analytics choices']);
+ command(['find','role','button','click','--name','Cookie choices']);
  command(['wait','--text','Help us understand interest in RoleClue?']);
  command(['find','role','button','click','--name','No thanks']);
  command(['open',origin]);for(const [width,height]of [[1440,1000],[390,844]]){command(['set','viewport',String(width),String(height)]);const result=command(['eval','--stdin'],'document.documentElement.scrollWidth <= window.innerWidth');if(!result.includes('true'))throw Error(`Horizontal overflow at ${width}`);}

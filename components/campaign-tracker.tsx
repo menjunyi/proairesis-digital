@@ -31,11 +31,11 @@ export function CampaignTracker() {
     } catch { setStorageError(true); setVisible(false); }
   }
   if (storageError) return null;
-  if (!visible) return choice ? <button className="fixed bottom-3 left-3 z-40 rounded border bg-white px-3 py-2 text-sm text-slate-700 shadow" onClick={() => setVisible(true)}>Analytics choices</button> : null;
-  return <aside aria-label="Optional campaign analytics" className="fixed bottom-4 left-4 right-4 z-50 max-w-lg rounded-2xl border bg-white p-5 text-slate-900 shadow-xl">
-    <p className="font-semibold">Help us understand interest in RoleClue?</p>
-    <p className="my-3 text-sm leading-6">Allow an anonymous browser identifier for 30 days to measure visits from this link. We don’t collect your citizenship, clearance or LinkedIn profile. <a className="underline" href="/cookies">How this works</a></p>
-    <div className="flex gap-3"><Button variant="outline" onClick={() => choose('rejected')}>No thanks</Button><Button onClick={() => choose('accepted')}>Allow analytics</Button></div>
+  if (!visible) return choice ? <button className="fixed bottom-3 left-3 z-40 rounded border bg-white px-3 py-2 text-sm text-slate-700 shadow" onClick={() => setVisible(true)}>Cookie choices</button> : null;
+  return <aside aria-label="Cookie choices" className="fixed bottom-4 left-4 right-4 z-50 max-w-lg rounded-2xl border bg-white p-5 text-slate-900 shadow-xl">
+    <p className="font-semibold">Cookies</p>
+    <p className="my-3 text-sm leading-6">We use cookies to improve your browsing experience. <a className="underline" href="/cookies">Cookie Policy</a></p>
+    <div className="flex gap-3"><Button variant="outline" onClick={() => choose('rejected')}>No thanks</Button><Button onClick={() => choose('accepted')}>Allow cookies</Button></div>
   </aside>;
 }
 function sendVisit(campaign: string) {
