@@ -51,7 +51,7 @@ const questions = [
   ['Can I use RoleClue today?', 'RoleClue is a working personal project, not a publicly operating service yet. The screenshots show the system I use for my own search. Book a conversation to see the workflow, share your challenges and help shape what comes next.'],
   [
     'Who is RoleClue’s Australian job search for?',
-    'RoleClue is for professionals exploring Australian jobs, whether you already live in Australia or are applying from overseas. Your preferred cities, relocation plans and work arrangements shape what is relevant to you.',
+    'RoleClue is for people seeking work in Australia who keep encountering requirements that make otherwise promising jobs unsuitable. This includes non-citizens, Australian citizens without the required security clearance, and people whose location, work rights, sponsorship needs or experience limit which roles fit. Your shortlist should reflect your situation. Citizenship and clearance are requirements to check in job ads, not requirements to use RoleClue.',
   ],
   [
     'Can RoleClue help me assess jobs that may require visa sponsorship?',
@@ -104,21 +104,23 @@ export default function Home() {
       <section className="pip-hero pip-wrap" id="main-content">
         <div className="hero-heading">
           <p className="pip-eyebrow">
-            <span className="pixel-dot" /> Australian job search · In development
+            <span className="pixel-dot" /> Australian jobs that fit your situation · In development
           </p>
           <h1>
-            Less reading.
+            Your skills fit.
             <br />
-            Less filtering.
+            Do the
             <br />
-            <span>More <em className="slogan-accent">relevant</em> jobs.</span>
+            <span><em className="slogan-accent">requirements?</em></span>
           </h1>
         </div>
         <div className="hero-intro">
           <p>
-            Jobs in one place. <strong>Filtered around you.</strong>{' '}
-            Choose your work rights, citizenship, clearance and sponsorship needs.
-            Spend less time reading unsuitable listings.
+            A promising job. Then you read <strong>“Australian citizens only”</strong> or
+            <strong> “Current security clearance required.”</strong>{' '}
+            RoleClue helps you find jobs that fit your situation, whether you’re a
+            non-citizen, a citizen without clearance, or limited by location,
+            work rights or the role’s experience requirements.
           </p>
           <div className="pip-actions">
             <Link className="pip-button" href="/book" data-analytics-location="hero">Help shape RoleClue <ArrowUpRight size={17} /></Link>
@@ -156,9 +158,10 @@ export default function Home() {
             <span>Until the fine print.</span>
           </h2>
           <p>
-            When a job board’s filters don’t cover citizenship, clearance or
-            sponsorship, you’re left opening listings and checking each one.
-            RoleClue surfaces those requirements so you can narrow your search sooner.
+            Your skills match, but the listing requires Australian citizenship or a
+            security clearance you don’t hold. Or the location or experience level doesn’t fit. You can spend hours
+            finding these restrictions one listing at a time. RoleClue brings them
+            into view sooner and flags unclear requirements for you to confirm.
           </p>
         </div>
         <div className="decision-grid">
@@ -313,8 +316,9 @@ export default function Home() {
               <span>Let’s build them together.</span>
             </h2>
             <p>
-              Tell me what would make your job search easier. We’ll shape the
-              features together, and I’ll build around what you need.
+              Looking for work in Australia? Tell me where citizenship, clearance,
+              location or role requirements get in your way, and what would make your
+              search easier. Help shape what I build next.
             </p>
             <p className="pricing-context">
               RoleClue is still in development. Join early and help decide what comes next.
@@ -406,7 +410,7 @@ export default function Home() {
         <div className="footer-top">
           <Brand />
           <p>
-            Job eligibility for your next move in Australia.
+            Australian jobs that fit your situation.
             <br />
             Clearer decisions. Applications in your hands.
           </p>

@@ -5,29 +5,29 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.SITE_URL ?? 'https://proairesis.digital',
   ),
-  title: 'RoleClue — AI job search and eligibility checks for Australia',
+  title: 'RoleClue — Australian jobs that fit your situation',
   description:
-    'RoleClue helps you check Australian job requirements, including work rights, sponsorship, citizenship, clearance and location, before preparing truthful applications.',
+    'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
   openGraph: {
     siteName: 'RoleClue',
-    title: 'RoleClue — AI job search and eligibility checks for Australia',
+    title: 'RoleClue — Australian jobs that fit your situation',
     description:
-      'Check the hard gates before you spend hours applying. Evidence-backed shortlists, truthful application drafts and human approval by design.',
+      'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
     type: 'website',
     images: [
       {
         url: '/og.png?v=roleclue-focus',
         width: 1731,
         height: 909,
-        alt: 'RoleClue — AI job search and eligibility checks for Australia',
+        alt: 'RoleClue — Australian jobs that fit your situation',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'RoleClue — AI job search and eligibility checks for Australia',
+    title: 'RoleClue — Australian jobs that fit your situation',
     description:
-      'Eligibility first. Evidence on every decision. No auto-apply.',
+      'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
     images: ['/og.png?v=roleclue-focus'],
   },
 };
