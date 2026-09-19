@@ -47,6 +47,7 @@ const steps = [
   },
 ];
 const questions = [
+  ['Who makes RoleClue?', 'RoleClue is an Australian job-search project by Proairesis Digital. It helps you review job requirements before applying. The founder uses the working prototype for their own search; public access is still in development.'],
   ['What do I get for booking a conversation?', 'Everyone who books a conversation with me will be invited to join RoleClue’s first group of users and receive one month of free usage. I’ll send your early-access invitation to the email address used for your booking.'],
   ['Can I use RoleClue today?', 'RoleClue is a working personal project, not a publicly operating service yet. The screenshots show the system I use for my own search. Book a conversation to see the workflow, share your challenges and help shape what comes next.'],
   [
@@ -80,8 +81,34 @@ function Brand() {
 }
 export default function Home() {
   const { email } = getContactDetails();
+  const siteUrl = new URL('/', process.env.SITE_URL ?? 'https://proairesis.digital').href;
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${siteUrl}#organization`,
+        name: 'Proairesis Digital',
+        legalName: 'PROAIRESIS DIGITAL',
+        url: siteUrl,
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${siteUrl}#website`,
+        name: 'RoleClue',
+        alternateName: 'RoleClue by Proairesis Digital',
+        url: siteUrl,
+        inLanguage: 'en-AU',
+        publisher: { '@id': `${siteUrl}#organization` },
+      },
+    ],
+  };
   return (
     <main id="top" className="pip-landing">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }}
+      />
       <a href="#main-content" className="pip-skip">
         Skip to content
       </a>
@@ -410,9 +437,9 @@ export default function Home() {
         <div className="footer-top">
           <Brand />
           <p>
-            Australian jobs that fit your situation.
+            RoleClue by Proairesis Digital.
             <br />
-            Clearer decisions. Applications in your hands.
+            Australian job search. Still in development.
           </p>
           <a href="#top" className="pip-text-link">
             Back to top <ArrowUpRight size={16} />

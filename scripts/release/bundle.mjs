@@ -13,6 +13,13 @@ export async function inventory(root){const files={};async function walk(dir){fo
 export async function verify(root){const m=JSON.parse(await readFile(path.join(root,'manifest.json')));if(m.schema!==1||!Array.isArray(m.routes)||JSON.stringify(m.routes)!==JSON.stringify(routes))throw Error('Invalid release manifest');for(const name of Object.keys(m.files))safePath(name);const files=await inventory(root);if(digest(files)!==m.digest||JSON.stringify(Object.keys(files).sort())!==JSON.stringify(Object.keys(m.files).sort())||digest(m.files)!==m.digest)throw Error('Artifact integrity failed');return m;}
 export async function writeManifest(root,metadata){const files=await inventory(root);const m={schema:1,...metadata,files,digest:digest(files)};await writeFile(path.join(root,'manifest.json'),JSON.stringify(m,null,2));return m;}
 export function run(cmd,args,options={}){const r=spawnSync(cmd,args,{stdio:'inherit',...options});if(r.status!==0)throw Error(`${cmd} failed`);}
+export function stripApplicationScripts(html){
+ return html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi,(_script,attributes,body)=>{
+  if(!/\btype\s*=\s*["']application\/ld\+json["']/i.test(attributes)||/\bsrc\s*=/i.test(attributes))return '';
+  const data=JSON.parse(body);
+  return `<script type="application/ld+json">${JSON.stringify(data).replaceAll('<','\\u003c')}</script>`;
+ });
+}
 const marker='https://release-origin.invalid';
 export async function build(){
  run('npm',['run','build'],{env:{...process.env,SITE_URL:marker}});
@@ -25,7 +32,7 @@ export async function build(){
  for(const route of routes){
   const response=await worker.fetch(new Request(marker+route),{}, {waitUntil(){}});
   if(!response.ok)throw Error(`Render failed: ${route}`);
-  let html=(await response.text()).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<link\b(?=[^>]*\brel=["'](?:modulepreload|preload)["'])(?=[^>]*(?:\bas=["']script["']|\brel=["']modulepreload["']))[^>]*>/gi,'').replace(/<meta\b(?=[^>]*name="robots")[^>]*>/gi,'').replace(/<link\b(?=[^>]*rel="canonical")[^>]*>/gi,'').replaceAll(marker,'__SITE_ORIGIN__');
+  let html=stripApplicationScripts(await response.text()).replace(/<link\b(?=[^>]*\brel=["'](?:modulepreload|preload)["'])(?=[^>]*(?:\bas=["']script["']|\brel=["']modulepreload["']))[^>]*>/gi,'').replace(/<meta\b(?=[^>]*name="robots")[^>]*>/gi,'').replace(/<link\b(?=[^>]*rel="canonical")[^>]*>/gi,'').replaceAll(marker,'__SITE_ORIGIN__');
   if(/href=["']\/(?:admin|billing|api)(?:[/"'#?])/.test(html))throw Error(`${route} exposes an excluded feature`);
   if(draft(html))throw Error(`${route} contains unpublished policy content`);
   html=html.replace('</head>',`<link rel="canonical" href="__SITE_ORIGIN__${route==='/'?'/':route}"/><meta name="robots" content="__ROBOTS__"/><meta name="release-environment" content="__ENVIRONMENT__"/></head>`);

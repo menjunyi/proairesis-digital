@@ -6,6 +6,15 @@ const origin=environment==='staging'?'https://staging.proairesis.digital':'https
 const manifest=JSON.parse(await readFile(`${releaseDir}/manifest.json`));
 if(manifest.environment!==environment)throw Error('Smoke environment mismatch');
 const evidence=[];
+const homepage=await (await fetch(origin+'/')).text();
+if(!homepage.includes('<title>RoleClue | Australian Job Search by Proairesis Digital</title>'))throw Error('Homepage brand title missing');
+const structured=Array.from(homepage.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g),m=>JSON.parse(m[1]));
+const entities=structured.flatMap(data=>data['@graph']||[data]);
+const website=entities.find(data=>data['@type']==='WebSite');
+const organization=entities.find(data=>data['@type']==='Organization');
+if(website?.name!=='RoleClue'||website.url!==origin+'/'||organization?.name!=='Proairesis Digital'||website.publisher?.['@id']!==organization['@id'])throw Error('Homepage brand structured data missing or inconsistent');
+if(!homepage.includes('RoleClue by Proairesis Digital.')||!homepage.includes(`rel="canonical" href="${origin}/"`))throw Error('Homepage attribution or canonical missing');
+if(!(await (await fetch(origin+'/book')).text()).includes('noindex'))throw Error('Booking page is indexable');
 for(const [file,hash]of Object.entries(manifest.files)){
  if(file.startsWith('server/'))continue;
  const response=await fetch(`${origin}/${file}`,{cache:'no-store',signal:AbortSignal.timeout(20000)});

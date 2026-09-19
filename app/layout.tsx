@@ -5,29 +5,29 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.SITE_URL ?? 'https://proairesis.digital',
   ),
-  title: 'RoleClue — Australian jobs that fit your situation',
+  title: 'RoleClue | Australian Job Search by Proairesis Digital',
   description:
-    'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
+    'RoleClue by Proairesis Digital helps you check Australian job ads for work rights, sponsorship, citizenship and clearance requirements. Explore the prototype.',
   openGraph: {
     siteName: 'RoleClue',
-    title: 'RoleClue — Australian jobs that fit your situation',
+    title: 'RoleClue | Australian Job Search by Proairesis Digital',
     description:
-      'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
+      'RoleClue by Proairesis Digital helps you check Australian job ads for work rights, sponsorship, citizenship and clearance requirements. Explore the prototype.',
     type: 'website',
     images: [
       {
         url: '/og.png?v=roleclue-focus',
         width: 1731,
         height: 909,
-        alt: 'RoleClue — Australian jobs that fit your situation',
+        alt: 'RoleClue | Australian Job Search by Proairesis Digital',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'RoleClue — Australian jobs that fit your situation',
+    title: 'RoleClue | Australian Job Search by Proairesis Digital',
     description:
-      'Find Australian jobs that fit your citizenship, clearance, work rights, location and experience. Check the requirements before spending time applying.',
+      'RoleClue by Proairesis Digital helps you check Australian job ads for work rights, sponsorship, citizenship and clearance requirements. Explore the prototype.',
     images: ['/og.png?v=roleclue-focus'],
   },
 };
