@@ -85,7 +85,8 @@ function createAws(profile) {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        error ? reject(error) : resolveOutput(value);
+        if (error) reject(error);
+        else resolveOutput(value);
       };
       const timer = setTimeout(() => {
         child.kill('SIGTERM');
@@ -301,6 +302,7 @@ export async function runCloudSmoke(env = process.env) {
   };
   const identities = [];
   const cleanupFailures = [];
+  const cleanupErrors = [];
   let testError, recommendationEvidence;
   try {
     const health = expect(await request('GET', '/api/health'), 200, 'health');
@@ -313,7 +315,7 @@ export async function runCloudSmoke(env = process.env) {
     for (const ordinal of [1, 2]) {
       const identity = {ordinal, email: `roleclue-smoke-${randomUUID()}@invalid.example`, password: `Rc9${randomBytes(27).toString('base64url')}`};
       // Record the exact attempted identity BEFORE creation so a transport
-      // failure after Cognito commits still reaches the finally cleanup path.
+      // failure after Cognito commits still reaches the cleanup path.
       identities.push(identity);
       await aws('cognito-idp', 'admin-create-user', {UserPoolId: outputs.CognitoUserPoolId, Username: identity.email,
         TemporaryPassword: identity.password, MessageAction: 'SUPPRESS',
@@ -418,16 +420,21 @@ export async function runCloudSmoke(env = process.env) {
     }
   } catch (error) {
     testError = error;
-  } finally {
-    // No direct DynamoDB/S3 deletes or broad Cognito cleanup. Each deletion is
-    // the same app operation users receive, scoped by that exact user's token.
-    // Read-only checks then prove the identity, partition and both prefixes are
-    // empty. Only the permanent, non-PII deletion hash is intentionally retained.
-    for (const identity of identities) {
-      try {
-        if (!identity.sub) {
-          try {await identify(identity);} catch (error) {if (error.code === 'UserNotFoundException') continue; throw error;}
+  }
+  // No direct DynamoDB/S3 deletes or broad Cognito cleanup. Each deletion is
+  // the same app operation users receive, scoped by that exact user's token.
+  // Read-only checks then prove the identity, partition and both prefixes are
+  // empty. Only the permanent, non-PII deletion hash is intentionally retained.
+  for (const identity of identities) {
+    try {
+      let exists = true;
+      if (!identity.sub) {
+        try {await identify(identity);} catch (error) {
+          if (error.code === 'UserNotFoundException') exists = false;
+          else throw error;
         }
+      }
+      if (exists) {
         if (!identity.token) {await setPassword(identity); await signIn(identity);}
         await waitForUploadGrant(identity);
         let deleted = false;
@@ -451,22 +458,39 @@ export async function runCloudSmoke(env = process.env) {
           requireCheck((objects.KeyCount ?? 0) === 0 && !objects.Contents?.length, 'Synthetic resume bytes remain after deletion');
         }
         record(`synthetic account ${identity.ordinal} deleted, old token rejected, identity/data/objects absent`);
-      } catch (error) {
-        // Identifiers here are random synthetic test data, never tokens or raw
-        // resumes. Retain actionable exact targets if an outage blocks cleanup;
-        // do not bypass the API or claim cleanup succeeded.
-        cleanupFailures.push({ordinal: identity.ordinal, email: identity.email, sub: identity.sub ?? null});
+      } else record(`synthetic account ${identity.ordinal} was not created`);
+    } catch (error) {
+      // Identifiers here are random synthetic test data, never tokens or raw
+      // resumes. Retain actionable exact targets if an outage blocks cleanup;
+      // do not bypass the API or claim cleanup succeeded.
+      cleanupErrors.push(error);
+      cleanupFailures.push({ordinal: identity.ordinal, email: identity.email, sub: identity.sub ?? null});
+      try {
         record(`synthetic account ${identity.ordinal} cleanup`, 'FAILED: app/API or read-only verification requires operator follow-up');
+      } catch (reportError) {
+        cleanupErrors.push(reportError);
       }
+    } finally {
       identity.password = undefined;
       identity.token = undefined;
     }
   }
+  let cleanupError;
   if (cleanupFailures.length) {
-    console.error(JSON.stringify({cleanupRequired: cleanupFailures, stack: stackName, account: ACCOUNT}));
-    throw new SmokeCheckError('Synthetic cleanup is incomplete; do not mark deployment acceptance passed');
+    try {
+      console.error(JSON.stringify({cleanupRequired: cleanupFailures, stack: stackName, account: ACCOUNT}));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    cleanupError = new SmokeCheckError('Synthetic cleanup is incomplete; do not mark deployment acceptance passed', {
+      cause: new AggregateError(cleanupErrors, 'One or more synthetic account cleanups failed'),
+    });
+  }
+  if (testError && cleanupError) {
+    throw new AggregateError([testError, cleanupError], 'Cloud smoke failed and synthetic cleanup was incomplete');
   }
   if (testError) throw testError;
+  if (cleanupError) throw cleanupError;
   await requireEmptyQueues();
   record('generation, recommendation and shared dead-letter queues are empty');
   record('cloud acceptance complete; all synthetic user data removed, only non-PII deletion hashes retained');

@@ -185,17 +185,17 @@ export function appTemplate() {
     DestinationConfig: { OnFailure: { Destination: get('FailedWork', 'Arn') } },
   }, { DependsOn: ['FunctionAlias'] });
   r.GenerationQueueMapping = resource('AWS::Lambda::EventSourceMapping', {
-    EventSourceArn: get('GenerationQueue', 'Arn'), FunctionName: get('FunctionAlias', 'Arn'), Enabled: true,
+    EventSourceArn: get('GenerationQueue', 'Arn'), FunctionName: ref('FunctionAlias'), Enabled: true,
     BatchSize: 1, MaximumBatchingWindowInSeconds: 0, FunctionResponseTypes: ['ReportBatchItemFailures'],
     ScalingConfig: { MaximumConcurrency: 5 },
   });
   r.RecommendationQueueMapping = resource('AWS::Lambda::EventSourceMapping', {
-    EventSourceArn: get('RecommendationQueue', 'Arn'), FunctionName: get('FunctionAlias', 'Arn'), Enabled: true,
+    EventSourceArn: get('RecommendationQueue', 'Arn'), FunctionName: ref('FunctionAlias'), Enabled: true,
     BatchSize: 1, MaximumBatchingWindowInSeconds: 0, FunctionResponseTypes: ['ReportBatchItemFailures'],
     ScalingConfig: { MaximumConcurrency: 2 },
   });
   r.Api = resource('AWS::ApiGatewayV2::Api', { Name: 'roleclue-member-app', ProtocolType: 'HTTP', CorsConfiguration: { AllowOrigins: [sub('https://${Hostname}')], AllowHeaders: ['authorization', 'content-type', 'idempotency-key'], AllowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], MaxAge: 300 } });
-  r.Integration = resource('AWS::ApiGatewayV2::Integration', { ApiId: ref('Api'), IntegrationType: 'AWS_PROXY', IntegrationUri: get('FunctionAlias', 'Arn'), PayloadFormatVersion: '2.0', TimeoutInMillis: 29000 });
+  r.Integration = resource('AWS::ApiGatewayV2::Integration', { ApiId: ref('Api'), IntegrationType: 'AWS_PROXY', IntegrationUri: ref('FunctionAlias'), PayloadFormatVersion: '2.0', TimeoutInMillis: 29000 });
   r.Authorizer = resource('AWS::ApiGatewayV2::Authorizer', { ApiId: ref('Api'), AuthorizerType: 'JWT', Name: 'VerifiedCognitoIdentity', IdentitySource: ['$request.header.Authorization'], JwtConfiguration: { Audience: [ref('UserPoolClient')], Issuer: sub('https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}') } });
   r.PrivateRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'ANY /api/{proxy+}', Target: sub('integrations/${Integration}'), AuthorizationType: 'JWT', AuthorizerId: ref('Authorizer') });
   r.GuestClaimRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'POST /api/guest/claim', Target: sub('integrations/${Integration}'), AuthorizationType: 'JWT', AuthorizerId: ref('Authorizer') });
@@ -206,11 +206,11 @@ export function appTemplate() {
     r[name] = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: routeKey, Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });
   }
   r.Stage = resource('AWS::ApiGatewayV2::Stage', { ApiId: ref('Api'), StageName: '$default', AutoDeploy: true, DefaultRouteSettings: { ThrottlingBurstLimit: 10, ThrottlingRateLimit: 5 }, AccessLogSettings: { DestinationArn: get('ApiLogs', 'Arn'), Format: JSON.stringify({ requestId: '$context.requestId', route: '$context.routeKey', status: '$context.status', latencyMs: '$context.responseLatency' }) } });
-  r.InvokePermission = resource('AWS::Lambda::Permission', { FunctionName: get('FunctionAlias', 'Arn'), Action: 'lambda:InvokeFunction', Principal: 'apigateway.amazonaws.com', SourceArn: sub('arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*') });
-  r.ScheduleRole = resource('AWS::IAM::Role', { AssumeRolePolicyDocument: assumeRole('scheduler.amazonaws.com'), Policies: [{ PolicyName: 'InvokeOnlyRoleClueSchedules', PolicyDocument: { Version: '2012-10-17', Statement: [statement(['lambda:InvokeFunction'], get('FunctionAlias', 'Arn'))] } }] });
-  r.DailyRefresh = resource('AWS::Scheduler::Schedule', { Description: 'RoleClue daily authorised job refresh', ScheduleExpression: 'cron(0 6 * * ? *)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: get('FunctionAlias', 'Arn'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'feed-refresh' }), RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 3600 } } });
-  r.GenerationRepair = resource('AWS::Scheduler::Schedule', { Description: 'Recover paid generation dispatches without browser activity', ScheduleExpression: 'rate(5 minutes)', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: get('FunctionAlias', 'Arn'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'generation-repair' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 } } });
-  r.AiAuthorityReview = resource('AWS::Scheduler::Schedule', { Description: 'Notify operators before the pinned RoleClue AI price authority expires', ScheduleExpression: 'at(2026-11-04T09:00:00)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: get('FunctionAlias', 'Arn'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'ai-authority-review' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 } } });
+  r.InvokePermission = resource('AWS::Lambda::Permission', { FunctionName: ref('FunctionAlias'), Action: 'lambda:InvokeFunction', Principal: 'apigateway.amazonaws.com', SourceArn: sub('arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*') });
+  r.ScheduleRole = resource('AWS::IAM::Role', { AssumeRolePolicyDocument: assumeRole('scheduler.amazonaws.com'), Policies: [{ PolicyName: 'InvokeOnlyRoleClueSchedules', PolicyDocument: { Version: '2012-10-17', Statement: [statement(['lambda:InvokeFunction'], ref('FunctionAlias'))] } }] });
+  r.DailyRefresh = resource('AWS::Scheduler::Schedule', { Description: 'RoleClue daily authorised job refresh', ScheduleExpression: 'cron(0 6 * * ? *)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'feed-refresh' }), RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 3600 } } });
+  r.GenerationRepair = resource('AWS::Scheduler::Schedule', { Description: 'Recover paid generation dispatches without browser activity', ScheduleExpression: 'rate(5 minutes)', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'generation-repair' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 } } });
+  r.AiAuthorityReview = resource('AWS::Scheduler::Schedule', { Description: 'Notify operators before the pinned RoleClue AI price authority expires', ScheduleExpression: 'at(2026-11-04T09:00:00)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'ai-authority-review' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 } } });
   r.OriginAccess = resource('AWS::CloudFront::OriginAccessControl', { OriginAccessControlConfig: { Name: sub('${AWS::StackName}-s3'), OriginAccessControlOriginType: 's3', SigningBehavior: 'always', SigningProtocol: 'sigv4' } });
   r.SecurityHeaders = resource('AWS::CloudFront::ResponseHeadersPolicy', { ResponseHeadersPolicyConfig: {
     Name: sub('${AWS::StackName}-security'), SecurityHeadersConfig: {
@@ -250,7 +250,7 @@ export function appTemplate() {
   t.Outputs = {
     SiteUrl: { Value: sub('https://${Hostname}') }, SiteBucket: { Value: ref('SiteBucket') }, ResumeBucket: { Value: ref('ResumeBucket') },
     TableName: { Value: ref('Table') }, DistributionId: { Value: ref('Distribution') }, DistributionDomain: { Value: get('Distribution', 'DomainName') }, ApiUrl: { Value: get('Api', 'ApiEndpoint') },
-    CognitoUserPoolId: { Value: ref('UserPool') }, CognitoClientId: { Value: ref('UserPoolClient') }, FunctionName: { Value: ref('Function') }, FunctionAliasArn: { Value: get('FunctionAlias', 'Arn') }, FunctionVersion: { Value: get('FunctionVersion', 'Version') },
+    CognitoUserPoolId: { Value: ref('UserPool') }, CognitoClientId: { Value: ref('UserPoolClient') }, FunctionName: { Value: ref('Function') }, FunctionAliasArn: { Value: ref('FunctionAlias') }, FunctionVersion: { Value: get('FunctionVersion', 'Version') },
     LambdaArtifactVersion: { Value: ref('ArtifactVersion') }, SiteArtifactVersion: { Value: ref('SiteArtifactVersion') }, SiteArtifactSha256: { Value: ref('SiteArtifactSha256') },
     CognitoHostedDomain: { Condition: 'GoogleSignInEnabled', Value: sub('https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com') },
     GenerationQueueUrl: { Value: ref('GenerationQueue') }, RecommendationQueueUrl: { Value: ref('RecommendationQueue') }, FailedWorkQueueUrl: { Value: ref('FailedWork') }, AlarmTopicArn: { Value: ref('AlarmTopic') },
@@ -264,7 +264,11 @@ export function appTemplate() {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const dir = resolve('build');
   await mkdir(dir, { recursive: true });
-  for (const [name, data] of [['certificate', certificateTemplate()], ['app', appTemplate()], ['artifacts', artifactTemplate()]]) {
+  for (const { name, data } of [
+    { name: 'certificate', data: certificateTemplate() },
+    { name: 'app', data: appTemplate() },
+    { name: 'artifacts', data: artifactTemplate() },
+  ]) {
     await writeFile(resolve(dir, `${name}.template.json`), JSON.stringify(data, null, 2));
   }
   console.log('Generated certificate and member-app CloudFormation templates in build/. No cloud changes made.');

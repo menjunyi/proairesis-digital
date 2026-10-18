@@ -20,7 +20,7 @@ import { verifyLiveRelease, writeSmokeEvidence } from "./smoke-evidence.mjs";
 // ROLECLUE_BROWSER_PAGE_LABEL may select its existing page and defaults to p1.
 // The smoke never creates, claims, closes or finishes a space. Allow roughly
 // 10 minutes, including upload-link expiry. SIGINT/SIGTERM requests stop new
-// tests but preserve finally cleanup.
+// tests but preserve the cleanup phase.
 // SIGKILL, machine shutdown or a prolonged outage can still require cleanup.
 // No emails, provider calls, payments, real resumes or saved passwords are used.
 const ACCOUNT = "037169690315";
@@ -159,7 +159,8 @@ function createAws(profile) {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
-        error ? reject(error) : resolveOutput(value);
+        if (error) reject(error);
+        else resolveOutput(value);
       };
       const timer = setTimeout(() => {
         child.kill("SIGTERM");
@@ -211,7 +212,8 @@ async function browserRound(parameters) {
   let stage = `Configured browser TaskSpace ${parameters.taskSpaceId}/${parameters.pageLabel} is unavailable. Check ROLECLUE_BROWSER_TASKSPACE_ID and ROLECLUE_BROWSER_PAGE_LABEL`,
     page,
     observerInstalled = false;
-  let outcome = { passed: false, stage };
+  let outcome = { passed: false, stage },
+    primaryError;
   try {
     const task = await taskSpace(parameters.taskSpaceId);
     if (
@@ -410,46 +412,88 @@ async function browserRound(parameters) {
         screenshot: parameters.screenshot,
       };
     }
-  } catch {
+  } catch (error) {
+    primaryError = error;
     outcome = { passed: false, stage };
-  } finally {
-    if (page && parameters.phase !== "preflight") {
-      try {
-        if (new URL(await page.url()).origin === parameters.siteUrl) {
-          if (observerInstalled)
-            await page.evaluate(() => window.__roleclueBrowserSmoke?.restore());
-          const state = await page.evaluate((email) => {
-            const session = JSON.parse(
-              sessionStorage.getItem("roleclue.session.v1") || "null",
-            );
-            return {
-              ownSession: session?.email === email,
-              ownForm:
-                document.querySelector('input[type="email"]')?.value === email,
-            };
-          }, parameters.email);
-          if (state.ownSession) {
-            await page.click('button[aria-label="Sign out"]');
-            await page.waitForSelector('input[type="password"]', {
-              state: "visible",
-              timeout: 30_000,
-            });
-          } else if (state.ownForm) {
-            await page.fill('input[type="password"]', "");
-            await page.fill('input[type="email"]', "");
-          }
-          const sessionGone = await page.evaluate((email) => {
-            const session = JSON.parse(
-              sessionStorage.getItem("roleclue.session.v1") || "null",
-            );
-            return session?.email !== email;
-          }, parameters.email);
-          if (!sessionGone) throw new Error("Sign-out incomplete");
+  }
+  let cleanupError;
+  if (page && parameters.phase !== "preflight") {
+    const cleanupErrors = [];
+    let onTargetOrigin = false;
+    try {
+      onTargetOrigin = new URL(await page.url()).origin === parameters.siteUrl;
+      if (!onTargetOrigin)
+        throw new Error("Browser left the target origin before cleanup");
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (onTargetOrigin) {
+      if (observerInstalled) {
+        try {
+          await page.evaluate(() => window.__roleclueBrowserSmoke?.restore());
+        } catch (error) {
+          cleanupErrors.push(error);
         }
-      } catch {
-        outcome = { passed: false, stage: "synthetic browser session cleanup" };
+      }
+      let state;
+      try {
+        state = await page.evaluate((email) => {
+          const session = JSON.parse(
+            sessionStorage.getItem("roleclue.session.v1") || "null",
+          );
+          return {
+            ownSession: session?.email === email,
+            ownForm:
+              document.querySelector('input[type="email"]')?.value === email,
+          };
+        }, parameters.email);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      if (state?.ownSession) {
+        try {
+          await page.click('button[aria-label="Sign out"]');
+          await page.waitForSelector('input[type="password"]', {
+            state: "visible",
+            timeout: 30_000,
+          });
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      } else if (state?.ownForm) {
+        try {
+          await page.fill('input[type="password"]', "");
+          await page.fill('input[type="email"]', "");
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      }
+      try {
+        const sessionGone = await page.evaluate((email) => {
+          const session = JSON.parse(
+            sessionStorage.getItem("roleclue.session.v1") || "null",
+          );
+          return session?.email !== email;
+        }, parameters.email);
+        if (!sessionGone) throw new Error("Sign-out incomplete");
+      } catch (error) {
+        cleanupErrors.push(error);
       }
     }
+    if (cleanupErrors.length) {
+      cleanupError = new AggregateError(
+        cleanupErrors,
+        "Synthetic browser session cleanup failed",
+      );
+    }
+  }
+  if (cleanupError) {
+    outcome = {
+      passed: false,
+      stage: primaryError
+        ? `${outcome.stage}; synthetic browser session cleanup also failed`
+        : "synthetic browser session cleanup",
+    };
   }
   // This is the only child output consumed by the parent. No credentials,
   // tokens, URLs with signatures, request bodies, snapshots or errors escape.
@@ -475,7 +519,8 @@ async function runBrowser(parameters, control) {
       finished = true;
       clearTimeout(timer);
       control.browserChild = null;
-      error ? reject(error) : resolveResult(result);
+      if (error) reject(error);
+      else resolveResult(result);
     };
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -898,7 +943,8 @@ export async function runBrowserSmoke(env = process.env) {
     checkContinue();
   } catch (error) {
     testError = error;
-  } finally {
+  }
+  try {
     if (attemptedIdentity) {
       try {
         let exists = true;
@@ -1045,16 +1091,32 @@ export async function runBrowserSmoke(env = process.env) {
         );
       }
     }
+  } catch (error) {
+    cleanupError = cleanupError
+      ? new AggregateError(
+          [cleanupError, error],
+          "Synthetic cleanup and cleanup reporting both failed",
+        )
+      : error;
+  } finally {
     identity.password = undefined;
     identity.token = undefined;
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
   }
-  if (cleanupError)
-    throw new SmokeCheckError(
-      "Synthetic cleanup incomplete. Inspect the suppressed roleclue-browser-smoke account in this verified stack; no direct-delete fallback was used.",
+  const cleanupFailure = cleanupError
+    ? new SmokeCheckError(
+        "Synthetic cleanup incomplete. Inspect the suppressed roleclue-browser-smoke account in this verified stack; no direct-delete fallback was used.",
+        { cause: cleanupError },
+      )
+    : undefined;
+  if (testError && cleanupFailure)
+    throw new AggregateError(
+      [testError, cleanupFailure],
+      "Browser smoke failed and synthetic cleanup was incomplete",
     );
   if (testError) throw testError;
+  if (cleanupFailure) throw cleanupFailure;
   check(
     !control.stopped,
     "Smoke interrupted; synthetic cleanup completed, acceptance was not marked passed",

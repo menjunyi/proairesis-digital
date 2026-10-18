@@ -13,7 +13,7 @@ const feed={status:async()=>({status:'not-configured',lastUpdatedAt:null}),jobs:
 async function fixture(){
   const store=new MemoryStore();
   await store.transact([change('USER#alice','PROFILE',null,profileFor(alice)),change('USER#bob','PROFILE',null,profileFor(bob))]);
-  const calls={alice:0,bob:0};let failing=false,legacyFailing=false,aliceJobs=jobsFor('alice'),bobJobs=jobsFor('bob');const queued=[];
+  const calls={alice:0,bob:0},bobJobs=jobsFor('bob');let failing=false,legacyFailing=false,aliceJobs=jobsFor('alice');const queued=[];
   const guestSearch={available:async()=>true,async search(profile){calls[profile.email.startsWith('alice')?'alice':'bob']++;if(failing)throw Object.assign(Error('Source unavailable'),{status:503,code:'JOB_SEARCH_UNAVAILABLE'});return {jobs:profile.email.startsWith('alice')?aliceJobs:bobJobs,source:{name:'Freehire',status:'ready',fetchedAt:new Date().toISOString()}};}};
   const legacyFeed={status:async()=>{if(legacyFailing)throw Error('Legacy source unavailable');return feed.status();},jobs:async()=>{if(legacyFailing)throw Error('Legacy source unavailable');return feed.jobs();},refresh:feed.refresh};
   const service=createService({store,feed:legacyFeed,guestSearch,dispatch:async message=>{queued.push(message);}});

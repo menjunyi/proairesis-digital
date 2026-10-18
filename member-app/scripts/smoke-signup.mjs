@@ -31,7 +31,7 @@ async function main() {
   const send = command => cognito.send(command, { abortSignal: AbortSignal.timeout(20000) });
   const newPassword = () => `Qa${randomBytes(24).toString('base64url')}9`;
   const password = newPassword(), ownershipName = `Synthetic Email Acceptance ${randomUUID()}`;
-  let aliasWasAbsent = false, signupAttempted = false, created = false, token, subject, cancelled;
+  let aliasWasAbsent = false, signupAttempted = false, created = false, token, subject, cancelled, testError, cleanupError;
   let stage = 'alias-absence preflight', codeTimer, rejectCode, closingInput = false;
   const input = createInterface({ input: process.stdin, terminal: false });
   const prepareCode = () => {
@@ -115,53 +115,72 @@ async function main() {
       console.log(JSON.stringify({ check: 'delivered-recovery-email-reset-signin-private-api', passed: true }));
     }
   } catch (error) {
-    if (error instanceof SafeError) throw error;
-    throw new SafeError(`Email signup test failed during ${stage}.`);
-  } finally {
-    clearTimeout(codeTimer);
-    closingInput = true;
-    input.close();
-    try {
-      // Reconcile a lost SignUp response only when the absent alias now has
-      // this run's random marker. Never delete an unrelated UsernameExists.
-      if (signupAttempted && aliasWasAbsent && (!created || !subject)) {
-        const recovered = await findAlias();
-        if (recovered) {
-          const attributes = Object.fromEntries((recovered.UserAttributes ?? []).map(x => [x.Name, x.Value]));
-          if (attributes.email !== email || attributes.name !== ownershipName || !/^[a-f0-9-]{36}$/i.test(attributes.sub ?? '')) throw new SafeError('The QA alias does not match this run; no identity was deleted.');
-          created = true; subject = attributes.sub;
-        }
-      }
-      if (created && token) {
-        let removed = false;
-        for (let attempt = 0; attempt < 2 && !removed; attempt++) {
-          try {
-            const response = await request('/api/account', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'DELETE' }) });
-            if (!response.ok || (await response.json()).deleted !== true) throw new SafeError(`Test account cleanup requires attention: HTTP ${response.status}`);
-            removed = true;
-          } catch (error) { if (attempt === 1) throw error; }
-        }
-        created = false;
-        console.log(JSON.stringify({ check: 'email-test-account-removed', passed: true }));
-      }
-      if (created) {
-        // Without a token this script has made no app-data writes. Delete only
-        // its known subject, never a broad alias or user search.
-        if (!/^[a-f0-9-]{36}$/i.test(subject ?? '')) throw new SafeError('The test identity subject is unavailable; manual reconciliation is required.');
-        try { await send(new AdminDeleteUserCommand({ UserPoolId: out.CognitoUserPoolId, Username: subject })); }
-        catch (error) { if (error.name !== 'UserNotFoundException') throw error; }
-        console.log(JSON.stringify({ check: 'unconfirmed-test-identity-removed', passed: true }));
-      }
-    } catch {
-      console.error(JSON.stringify({ check: 'email-test-cleanup', passed: false, cleanupRequired: { email, subject: subject ?? null }, message: 'Reconcile this exact QA identity; cleanup could not be confirmed.' }));
-      throw new SafeError('Email test cleanup requires operator attention.');
-    } finally {
-      token = undefined;
-      process.removeListener('SIGINT', interrupt);
-      process.removeListener('SIGTERM', interrupt);
-      cognito.destroy();
-    }
+    testError = error instanceof SafeError
+      ? error
+      : new SafeError(`Email signup test failed during ${stage}.`, {cause: error});
   }
+  clearTimeout(codeTimer);
+  closingInput = true;
+  const cleanupErrors = [];
+  try { input.close(); } catch (error) { cleanupErrors.push(error); }
+  try {
+    // Reconcile a lost SignUp response only when the absent alias now has
+    // this run's random marker. Never delete an unrelated UsernameExists.
+    if (signupAttempted && aliasWasAbsent && (!created || !subject)) {
+      const recovered = await findAlias();
+      if (recovered) {
+        const attributes = Object.fromEntries((recovered.UserAttributes ?? []).map(x => [x.Name, x.Value]));
+        if (attributes.email !== email || attributes.name !== ownershipName || !/^[a-f0-9-]{36}$/i.test(attributes.sub ?? '')) throw new SafeError('The QA alias does not match this run; no identity was deleted.');
+        created = true; subject = attributes.sub;
+      }
+    }
+    if (created && token) {
+      let removed = false;
+      for (let attempt = 0; attempt < 2 && !removed; attempt++) {
+        try {
+          const response = await request('/api/account', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'DELETE' }) });
+          if (!response.ok || (await response.json()).deleted !== true) throw new SafeError(`Test account cleanup requires attention: HTTP ${response.status}`);
+          removed = true;
+        } catch (error) { if (attempt === 1) throw error; }
+      }
+      created = false;
+      console.log(JSON.stringify({ check: 'email-test-account-removed', passed: true }));
+    }
+    if (created) {
+      // Without a token this script has made no app-data writes. Delete only
+      // its known subject, never a broad alias or user search.
+      if (!/^[a-f0-9-]{36}$/i.test(subject ?? '')) throw new SafeError('The test identity subject is unavailable; manual reconciliation is required.');
+      try { await send(new AdminDeleteUserCommand({ UserPoolId: out.CognitoUserPoolId, Username: subject })); }
+      catch (error) { if (error.name !== 'UserNotFoundException') throw error; }
+      created = false;
+      console.log(JSON.stringify({ check: 'unconfirmed-test-identity-removed', passed: true }));
+    }
+  } catch (error) {
+    cleanupErrors.push(error);
+  } finally {
+    token = undefined;
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', interrupt);
+    try { cognito.destroy(); } catch (error) { cleanupErrors.push(error); }
+  }
+  if (cleanupErrors.length) {
+    try {
+      console.error(JSON.stringify({ check: 'email-test-cleanup', passed: false, cleanupRequired: { email, subject: subject ?? null }, message: 'Reconcile this exact QA identity; cleanup could not be confirmed.' }));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    cleanupError = new SafeError('Email test cleanup requires operator attention.', {
+      cause: new AggregateError(cleanupErrors, 'Email smoke cleanup failed'),
+    });
+  }
+  if (!testError && cancelled) testError = cancelled;
+  if (testError && cleanupError) {
+    throw new SafeError('Email signup test failed and cleanup requires operator attention.', {
+      cause: new AggregateError([testError, cleanupError], 'Email signup smoke failed and cleanup was incomplete'),
+    });
+  }
+  if (testError) throw testError;
+  if (cleanupError) throw cleanupError;
   checkCancelled();
 }
 

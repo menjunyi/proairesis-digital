@@ -31,15 +31,16 @@ const paid = {
   used: 3, limit: 50, remaining: 47, canGenerate: true,
   periodEnd: "2026-11-12T00:00:00Z",
 };
-const module = { exports: {} };
+const commonJsModule = { exports: {} };
 const compiled = buildSync({
   entryPoints: [fileURLToPath(new URL("../src/App.jsx", import.meta.url))],
   bundle: true, platform: "node", format: "cjs", packages: "external", write: false,
 }).outputFiles[0].text;
+// oxlint-disable-next-line typescript/no-implied-eval -- Executes local esbuild output in this test harness.
 new Function("require", "module", "exports", compiled)(
-  createRequire(import.meta.url), module, module.exports,
+  createRequire(import.meta.url), commonJsModule, commonJsModule.exports,
 );
-const { AccountScreen, UpgradeDialog } = module.exports;
+const { AccountScreen, UpgradeDialog } = commonJsModule.exports;
 const account = (billing, enabled = true) => renderToStaticMarkup(
   React.createElement(AccountScreen, {
     config: { mode: "production", capabilities: { billing: true } },

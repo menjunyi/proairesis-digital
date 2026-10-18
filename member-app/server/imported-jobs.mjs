@@ -44,7 +44,7 @@ export function canonicalJobUrl(value) {
     || !host.includes('.') || /(?:^|\.)(?:localhost|local|internal)$/.test(host)) {
     invalid('Use a credential-free HTTPS job link on a public website.');
   }
-  for (const key of url.searchParams.keys()) {
+  for (const key of Array.from(url.searchParams.keys())) {
     if (/^(?:access_token|id_token|refresh_token|password|secret|api_key|app_key|x-amz-.+)$/i.test(key)) {
       invalid('Remove private access tokens or credentials from the job link.');
     }
@@ -60,7 +60,7 @@ export function canonicalJobUrl(value) {
     return `https://www.linkedin.com/jobs/view/${match[1]}/`;
   }
   url.hash = '';
-  for (const key of [...url.searchParams.keys()]) {
+  for (const key of Array.from(url.searchParams.keys())) {
     if (/^(?:utm_.+|gclid|fbclid|msclkid|trackingId)$/i.test(key)) url.searchParams.delete(key);
   }
   url.searchParams.sort();

@@ -5,7 +5,7 @@ import {MemoryStore,change} from '../server/store.mjs';
 import {AI_PRICING_VERSION,AI_PRICING_EXPIRES_AT,ONE_TIME_KAIPAI_EXCEPTION,ONE_TIME_KAIPAI_SERUM_EXCEPTION} from '../server/ai-budget.mjs';
 
 const now = () => new Date('2026-10-12T03:00:00Z');
-const read = async (service, operation) => service === 'sts' ? {Account: '037169690315'} : {Stacks: [{
+const read = async (service, _operation) => service === 'sts' ? {Account: '037169690315'} : {Stacks: [{
   StackId: 'arn:aws:cloudformation:ap-southeast-2:037169690315:stack/roleclue-member-app/synthetic',
   StackStatus: 'CREATE_COMPLETE', Outputs: [{OutputKey: 'TableName', OutputValue: 'roleclue-synthetic-budget-table'}],
 }]};

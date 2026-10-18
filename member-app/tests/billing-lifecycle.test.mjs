@@ -34,7 +34,7 @@ async function fixture(overrides={}){
     invoicePayments:{async list({invoice}){return {data:state.paymentsByInvoice?.[invoice]??state.payments,has_more:false};}},
     paymentIntents:{async retrieve(){return {...state.intent,latest_charge:state.charge};}},
     charges:{async retrieve(){return state.charge;}},
-    invoices:{async retrieve(id){const currentId=typeof state.sub?.latest_invoice==='string'?state.sub.latest_invoice:state.sub?.latest_invoice?.id;return {...monthlyInvoice(state.sub,id),...(id===currentId?state.invoice:{}),...(state.invoiceById?.[id]??{})};},async list(){return {data:state.invoiceHistory??[],has_more:false};}},
+    invoices:{async retrieve(id){const currentId=typeof state.sub?.latest_invoice==='string'?state.sub.latest_invoice:state.sub?.latest_invoice?.id;return {...monthlyInvoice(state.sub,id),...(id===currentId?state.invoice:{}),...state.invoiceById?.[id]};},async list(){return {data:state.invoiceHistory??[],has_more:false};}},
     prices:{async retrieve(id){return id===env.STRIPE_STARTER_PRICE_ID?starterPrice():state.prices;}},
     checkout:{sessions:{async list(){return {data:[],has_more:false};},async create(params,options){state.checkout.push({params,options});return {id:'cs_synthetic',url:'https://checkout.stripe.com/synthetic',expires_at:params.expires_at,automatic_tax:params.automatic_tax};},async expire(id){state.expired.push(id);return {id,status:'expired'};},async retrieve(){return {id:'cs_synthetic',mode:'subscription',customer:'cus_alice',client_reference_id:'alice',status:state.checkoutStatus??'open',expires_at:now+3600,subscription:state.checkoutSubscriptionId??'sub_alice',automatic_tax:{enabled:false},metadata:{roleclue_plan:'monthly',roleclue_price_id:env.STRIPE_PRICE_ID,terms_version:TERMS_VERSION},line_items:{data:[{price:{id:env.STRIPE_PRICE_ID},quantity:1}]}};}}},
     billingPortal:{sessions:{async create(params){state.portals.push(params);return {url:'https://billing.stripe.com/synthetic'};}}},
@@ -145,7 +145,7 @@ test('renewal resets allowance only for the verified new period; duplicate recon
   const {state,store,billing}=await fixture();
   state.sub.items.data[0].current_period_start=now;
   await billing.reconcile(user.sub,store);
-  let row=await store.get('USER#alice','ENTITLEMENT');
+  const row=await store.get('USER#alice','ENTITLEMENT');
   assert.equal(row.value.paid.used,0);assert.equal(billingView(row.value).remaining,50);
   row.value.paid={...row.value.paid,used:12,reserved:2};await store.transact([change('USER#alice','ENTITLEMENT',row,row.value)]);
   await billing.reconcile(user.sub,store);
@@ -355,7 +355,7 @@ test('a completed failed subscription may be retried only after its ended state 
 test('unverified cached checkout URLs fail closed instead of using a weaker adapter fallback',async()=>{
   const {state,store,service}=await fixture();state.sub=null;
   await service.checkout(user,{termsAccepted:true});
-  const row=await store.get('USER#alice','CHECKOUT'),{sessionId,...withoutIdentity}=row.value;
+  const row=await store.get('USER#alice','CHECKOUT'),{sessionId:_sessionId,...withoutIdentity}=row.value;
   await store.transact([change('USER#alice','CHECKOUT',row,withoutIdentity)]);
   await assert.rejects(service.checkout(user,{termsAccepted:true}),error=>error.status===503);
   assert.equal(state.checkout.length,1);
@@ -397,7 +397,7 @@ test('starter checkout is a fixed A$1 payment with dashboard-managed methods and
 test('verified paid starter session grants two lifetime generations once and duplicate reconciliation keeps usage',async()=>{
   const {state,store,billing,service}=await starterFixture();state.sessions=[{id:'cs_starter',mode:'payment',created:now,metadata:{roleclue_plan:'starter'}}];
   await billing.reconcile(user.sub,store);
-  let row=await store.get('USER#alice','ENTITLEMENT'),view=billingView(row.value);
+  const row=await store.get('USER#alice','ENTITLEMENT');let view=billingView(row.value);
   assert.equal(view.plan,'starter');assert.equal(view.limit,2);assert.equal(view.remaining,2);assert.equal(view.canPurchaseStarter,false);assert.equal(row.value.starter.everPaid,true);
   row.value.starter.used=1;row.value.starter.reserved=1;await store.transact([change(row.pk,row.sk,row,row.value)]);await billing.reconcile(user.sub,store);
   view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);assert.equal(view.used,1);assert.equal(view.reserved,1);assert.equal(view.remaining,0);

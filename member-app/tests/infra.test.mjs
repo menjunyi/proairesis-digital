@@ -5,7 +5,8 @@ import { apiOriginRequestPolicyId, appTemplate, artifactTemplate } from '../infr
 test('production is authenticated by default, with only bounded guest intake, health and signed Stripe callbacks public', () => {
   const routes = Object.values(appTemplate().Resources).filter(r => r.Type === 'AWS::ApiGatewayV2::Route');
   assert.equal(routes.find(r => r.Properties.RouteKey === 'ANY /api/{proxy+}').Properties.AuthorizationType, 'JWT');
-  assert.deepEqual(routes.filter(r => r.Properties.AuthorizationType === 'NONE').map(r => r.Properties.RouteKey).sort(), ['GET /api/health','POST /api/guest/ignore','POST /api/guest/profile','POST /api/guest/resume','POST /api/guest/search','POST /api/guest/session','POST /api/guest/start','POST /api/stripe/webhook','PUT /api/guest/profile'].sort());
+  const compareRouteKeys = (left, right) => left.localeCompare(right);
+  assert.deepEqual(routes.filter(r => r.Properties.AuthorizationType === 'NONE').map(r => r.Properties.RouteKey).sort(compareRouteKeys), ['GET /api/health','POST /api/guest/ignore','POST /api/guest/profile','POST /api/guest/resume','POST /api/guest/search','POST /api/guest/session','POST /api/guest/start','POST /api/stripe/webhook','PUT /api/guest/profile'].sort(compareRouteKeys));
   assert.equal(routes.find(r => r.Properties.RouteKey === 'POST /api/guest/claim').Properties.AuthorizationType,'JWT');
   assert.equal(routes.find(r => r.Properties.RouteKey === 'POST /api/continuation/complete').Properties.AuthorizationType,'JWT');
 });
@@ -53,7 +54,7 @@ test('daily refresh is timezone-aware and async work has isolated bounded queues
   assert.equal(r.DailyRefresh.Properties.ScheduleExpression, 'cron(0 6 * * ? *)');
   assert.equal(r.GenerationRepair.Properties.ScheduleExpression, 'rate(5 minutes)');
   assert.equal(r.GenerationRepair.Properties.Target.Input, JSON.stringify({kind:'generation-repair'}));
-  assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
+  assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, { Ref: 'FunctionAlias' });
   assert.deepEqual(r.GenerationRepair.Properties.Target.RetryPolicy, { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 });
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpression, 'at(2026-11-04T09:00:00)');
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
@@ -69,7 +70,7 @@ test('daily refresh is timezone-aware and async work has isolated bounded queues
   assert.deepEqual(r.RecommendationQueue.Properties.RedrivePolicy.deadLetterTargetArn, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
   assert.equal(r.GenerationQueueMapping.Properties.BatchSize, 1);
   assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionResponseTypes, ['ReportBatchItemFailures']);
-  assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
+  assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, { Ref: 'FunctionAlias' });
   assert.deepEqual(r.GenerationQueueMapping.Properties.ScalingConfig, { MaximumConcurrency: 5 });
   assert.equal(r.RecommendationQueueMapping.Properties.BatchSize, 1);
   assert.deepEqual(r.RecommendationQueueMapping.Properties.FunctionResponseTypes, ['ReportBatchItemFailures']);
@@ -96,8 +97,30 @@ test('production deployment is immutable and alarms have an operator destination
   assert.equal(r.FunctionVersion.Type, 'AWS::Lambda::Version');
   assert.equal(r.FunctionVersion.UpdateReplacePolicy, 'Retain');
   assert.equal(r.FunctionAlias.Properties.Name, 'live');
-  assert.deepEqual(r.Integration.Properties.IntegrationUri, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
-  assert.deepEqual(r.DailyRefresh.Properties.Target.Arn, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
+  const aliasArn = { Ref: 'FunctionAlias' };
+  assert.deepEqual(r.Integration.Properties.IntegrationUri, aliasArn);
+  assert.deepEqual(r.InvokePermission.Properties.FunctionName, aliasArn);
+  assert.deepEqual(r.ScheduleRole.Properties.Policies[0].PolicyDocument.Statement[0].Resource, aliasArn);
+  assert.deepEqual(r.DailyRefresh.Properties.Target.Arn, aliasArn);
+  assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, aliasArn);
+  assert.deepEqual(r.AiAuthorityReview.Properties.Target.Arn, aliasArn);
+  assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, aliasArn);
+  assert.deepEqual(r.RecommendationQueueMapping.Properties.FunctionName, aliasArn);
+  assert.deepEqual(template.Outputs.FunctionAliasArn.Value, aliasArn);
+  const invalidAliasArnReferences = [];
+  const visit = (value, path = []) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, index]));
+      return;
+    }
+    if (Array.isArray(value['Fn::GetAtt']) && value['Fn::GetAtt'][0] === 'FunctionAlias' && value['Fn::GetAtt'][1] === 'Arn') {
+      invalidAliasArnReferences.push(path.join('.'));
+    }
+    for (const [key, item] of Object.entries(value)) visit(item, [...path, key]);
+  };
+  visit(template);
+  assert.deepEqual(invalidAliasArnReferences, []);
   for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'AiAuthorityReviewAlarm']) {
     assert.deepEqual(r[name].Properties.AlarmActions, [{ Ref: 'AlarmTopic' }]);
   }

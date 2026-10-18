@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -156,11 +162,6 @@ const dateTime = (value) =>
         minute: "2-digit",
       })
     : "Not available";
-const split = (value) =>
-  value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 const cx = (...values) => values.filter(Boolean).join(" ");
 
 function Mark() {
@@ -317,8 +318,101 @@ export default function App() {
   const capabilities = capabilitiesFor(config, me?.capabilities);
   const guestSearchAvailable = guestJourneyAvailable(config);
   const api = useMemo(() => (config ? createApi(config) : null), [config]);
+  const publishBilling = useCallback(
+    (billing) => {
+      if (
+        renderedSessionVersion === sessionVersion.current &&
+        readSession()
+      )
+        setMe((value) => (value ? { ...value, billing } : value));
+    },
+    [renderedSessionVersion],
+  );
+  const acceptSession = useCallback((next) => {
+    sessionVersion.current += 1;
+    setMe(null);
+    setError(null);
+    const pending = readContinuation();
+    if (pending) {
+      const updated = saveContinuation({ awaitingAuth: false });
+      setContinuation(updated);
+    }
+    setSession(next);
+  }, []);
+  const acceptAccount = useCallback((result) => {
+    const nextContinuation = reconcileClaimedContinuation(
+      readContinuation(),
+      result?.continuation,
+    );
+    setContinuation(nextContinuation);
+    setMe(result);
+    return result;
+  }, []);
+  const refreshMe = useCallback(async () => {
+    const version = sessionVersion.current;
+    const result = await api("/me");
+    if (version !== sessionVersion.current || !readSession())
+      throw new Error("Your session changed. Please sign in again.");
+    return acceptAccount(result);
+  }, [acceptAccount, api]);
+  const openContinuationApplication = useCallback(
+    async (applicationId) => {
+      if (!api || !applicationId || completionPending.current) return;
+      completionPending.current = true;
+      setContinuationStatus("completing");
+      setContinuationError(null);
+      try {
+        const result = await api("/continuation/complete", {
+          method: "POST",
+          body: { applicationId },
+        });
+        const completedId = completedContinuationApplicationId(result);
+        if (completedId) rememberApplication(completedId);
+        setApplicationTarget(completedId);
+        setMe((current) =>
+          current ? { ...current, continuation: null } : current,
+        );
+        clearContinuation();
+        setContinuation(null);
+        setContinuationGateMessage("");
+        setContinuationStatus("");
+        window.location.hash = "applications";
+      } catch (failure) {
+        if (failure.status === 402) {
+          setMe((current) =>
+            current
+              ? {
+                  ...current,
+                  billing: {
+                    ...current.billing,
+                    canGenerate: false,
+                    remaining: 0,
+                    reason: failure.code || "PAYMENT_REQUIRED",
+                  },
+                }
+              : current,
+          );
+          setContinuationGateMessage(
+            "Paid access could not be verified. Your application remains saved. Choose an available plan or check payment again.",
+          );
+          setContinuationStatus("");
+          try {
+            await refreshMe();
+          } catch {
+            // Keep the conservative no-access view until the account can refresh.
+          }
+          return;
+        }
+        setContinuationError(failure);
+        setContinuationStatus("completion-error");
+      } finally {
+        completionPending.current = false;
+      }
+    },
+    [api, refreshMe],
+  );
   useEffect(() => {
-    loadConfig().then(setConfig).catch(setConfigError);
+    void loadConfig().then(setConfig).catch(setConfigError);
   }, []);
   useEffect(() => {
     const authQuery = new URLSearchParams(window.location.search);
@@ -343,7 +437,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [config, session]);
+  }, [acceptSession, config, session]);
   useEffect(() => {
     const handler = () => {
       const next = window.location.hash.slice(1);
@@ -395,86 +489,6 @@ export default function App() {
       if (opener?.isConnected) opener.focus();
     };
   }, [menu, mobile]);
-  function acceptSession(next) {
-    sessionVersion.current += 1;
-    setMe(null);
-    setError(null);
-    const pending = readContinuation();
-    if (pending) {
-      const updated = saveContinuation({ awaitingAuth: false });
-      setContinuation(updated);
-    }
-    setSession(next);
-  }
-  function acceptAccount(result) {
-    const nextContinuation = reconcileClaimedContinuation(
-      readContinuation(),
-      result?.continuation,
-    );
-    setContinuation(nextContinuation);
-    setMe(result);
-    return result;
-  }
-  async function refreshMe() {
-    const version = sessionVersion.current;
-    const result = await api("/me");
-    if (version !== sessionVersion.current || !readSession())
-      throw new Error("Your session changed. Please sign in again.");
-    return acceptAccount(result);
-  }
-  async function openContinuationApplication(applicationId) {
-    if (!api || !applicationId || completionPending.current) return;
-    completionPending.current = true;
-    setContinuationStatus("completing");
-    setContinuationError(null);
-    try {
-      const result = await api("/continuation/complete", {
-        method: "POST",
-        body: { applicationId },
-      });
-      const completedId = completedContinuationApplicationId(result);
-      if (completedId) rememberApplication(completedId);
-      setApplicationTarget(completedId);
-      setMe((current) =>
-        current ? { ...current, continuation: null } : current,
-      );
-      clearContinuation();
-      setContinuation(null);
-      setContinuationGateMessage("");
-      setContinuationStatus("");
-      window.location.hash = "applications";
-    } catch (failure) {
-      if (failure.status === 402) {
-        setMe((current) =>
-          current
-            ? {
-                ...current,
-                billing: {
-                  ...current.billing,
-                  canGenerate: false,
-                  remaining: 0,
-                  reason: failure.code || "PAYMENT_REQUIRED",
-                },
-              }
-            : current,
-        );
-        setContinuationGateMessage(
-          "Paid access could not be verified. Your application remains saved. Choose an available plan or check payment again.",
-        );
-        setContinuationStatus("");
-        try {
-          await refreshMe();
-        } catch {
-          // Keep the conservative no-access view until the account can refresh.
-        }
-        return;
-      }
-      setContinuationError(failure);
-      setContinuationStatus("completion-error");
-    } finally {
-      completionPending.current = false;
-    }
-  }
   async function openExistingWorkspace() {
     if (!api || !continuation?.token || claimPending.current) return;
     claimPending.current = true;
@@ -522,7 +536,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [api, session]);
+  }, [acceptAccount, api, session]);
   useEffect(() => {
     if (
       !api ||
@@ -580,11 +594,24 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [api, session, me, continuation?.token, continuation?.jobId, continuation?.claimed, continuationAttempt]);
+  }, [
+    api,
+    session,
+    me,
+    continuation?.token,
+    continuation?.jobId,
+    continuation?.claimed,
+    continuationAttempt,
+    refreshMe,
+  ]);
   useEffect(() => {
     if (!continuation?.applicationId || !me?.billing?.canGenerate) return;
     void openContinuationApplication(continuation.applicationId);
-  }, [continuation?.applicationId, me?.billing?.canGenerate]);
+  }, [
+    continuation?.applicationId,
+    me?.billing?.canGenerate,
+    openContinuationApplication,
+  ]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 5500);
@@ -833,7 +860,7 @@ export default function App() {
             config={config}
             me={me}
             dataOnly
-            onBilling={(billing) => setMe((value) => ({ ...value, billing }))}
+            onBilling={publishBilling}
             onUpgrade={() => setShowGateAccount(false)}
             onNotice={setNotice}
             onDeleted={() => {
@@ -862,9 +889,8 @@ export default function App() {
       <PlanGate
         api={api}
         billing={me.billing}
-        applicationId={continuation.applicationId}
         initialMessage={continuationGateMessage}
-        onBilling={(billing) => setMe((value) => ({ ...value, billing }))}
+        onBilling={publishBilling}
         onReady={() =>
           void openContinuationApplication(continuation.applicationId)
         }
@@ -920,7 +946,7 @@ export default function App() {
             ].map(([Icon, id, text]) => (
               <a
                 key={id}
-                href={`#${id}`}
+                href={`#${String(id)}`}
                 aria-current={currentRoute === id ? "page" : undefined}
                 className={cx(currentRoute === id && "active")}
               >
@@ -1034,7 +1060,7 @@ export default function App() {
                   onClick={() => {
                     setError(null);
                     setLoading(true);
-                    refreshMe()
+                    void refreshMe()
                       .catch(setError)
                       .finally(() => setLoading(false));
                   }}
@@ -1047,13 +1073,7 @@ export default function App() {
                 <CheckoutReturn
                   api={api}
                   enabled={capabilities.billing}
-                  onBilling={(billing) => {
-                    if (
-                      renderedSessionVersion === sessionVersion.current &&
-                      readSession()
-                    )
-                      setMe((value) => ({ ...value, billing }));
-                  }}
+                  onBilling={publishBilling}
                 />
                 {onboarding && currentRoute === "profile" && (
                   <div className="onboarding-note">
@@ -1087,13 +1107,7 @@ export default function App() {
                   <ApplicationsScreen
                     api={api}
                     billing={me.billing}
-                    onBilling={(billing) => {
-                      if (
-                        renderedSessionVersion === sessionVersion.current &&
-                        readSession()
-                      )
-                        setMe((value) => ({ ...value, billing }));
-                    }}
+                    onBilling={publishBilling}
                     onUpgrade={() => setPaywall(true)}
                     onNotice={setNotice}
                     capabilities={capabilities}
@@ -1105,13 +1119,7 @@ export default function App() {
                     api={api}
                     config={config}
                     me={me}
-                    onBilling={(billing) => {
-                      if (
-                        renderedSessionVersion === sessionVersion.current &&
-                        readSession()
-                      )
-                        setMe((value) => ({ ...value, billing }));
-                    }}
+                    onBilling={publishBilling}
                     onUpgrade={() => setPaywall(true)}
                     onNotice={setNotice}
                     onDeleted={() => {
@@ -1169,7 +1177,6 @@ export default function App() {
 function PlanGate({
   api,
   billing,
-  applicationId,
   initialMessage = "",
   onBilling,
   onReady,
@@ -1189,6 +1196,8 @@ function PlanGate({
       : initialMessage,
   );
   const mounted = useRef(true);
+  const onBillingRef = useRef(onBilling);
+  const onReadyRef = useRef(onReady);
 
   useEffect(() => {
     mounted.current = true;
@@ -1197,7 +1206,11 @@ function PlanGate({
     };
   }, []);
   useEffect(() => {
-    if (billing?.canGenerate) onReady();
+    onBillingRef.current = onBilling;
+    onReadyRef.current = onReady;
+  }, [onBilling, onReady]);
+  useEffect(() => {
+    if (billing?.canGenerate) onReadyRef.current();
   }, [billing?.canGenerate]);
   useEffect(() => {
     if (returnKind !== "success" || billing?.canGenerate) return;
@@ -1210,20 +1223,20 @@ function PlanGate({
           assertCurrent() {
             if (cancelled) throw new Error("Payment verification was cancelled.");
           },
-          onBilling,
+          onBilling: (nextBilling) => onBillingRef.current(nextBilling),
         });
         if (cancelled) return;
         const outcome = billingReturnOutcome("success", next, returnPlan);
         if (outcome === "verified") {
           setBusy("");
           setMessage("Payment confirmed. Opening your selected application.");
-          onReady();
+          onReadyRef.current();
           return;
         }
         attempts += 1;
         if (attempts < 4) {
           setMessage("Stripe is still confirming your payment. Your selected role is safe.");
-          timer = setTimeout(verify, 8000);
+          timer = setTimeout(() => void verify(), 8000);
         } else {
           setBusy("");
           setMessage("Payment is still processing. Check again in a moment; access unlocks only after Stripe confirms it.");
@@ -1235,7 +1248,7 @@ function PlanGate({
         }
       }
     };
-    verify();
+    void verify();
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -1301,12 +1314,16 @@ function PlanGate({
         <fieldset className="plan-gate-options">
           <legend>Choose one plan. Nothing is preselected.</legend>
           {presentation.canBuyStarter && (
-            <label className={cx("plan-gate-option", selectedPlan === "starter" && "selected")}>
-              <input type="radio" name="continuation-plan" value="starter" checked={selectedPlan === "starter"} onChange={() => { setSelectedPlan("starter"); setAccepted(false); }} />
-              <span className="plan-name"><span className="eyebrow">STARTER</span><strong>A$1</strong><small>one time</small></span>
-              <span className="plan-description"><strong>2 successful cover letters</strong><small>One purchase per account. Credits do not expire. This is not a subscription or a free trial.</small></span>
-            </label>
+            <>
+              {/* eslint-disable-next-line jsx-a11y/label-has-associated-control -- The radio input is wrapped by this option label. */}
+              <label className={cx("plan-gate-option", selectedPlan === "starter" && "selected")}>
+                <input type="radio" name="continuation-plan" value="starter" checked={selectedPlan === "starter"} onChange={() => { setSelectedPlan("starter"); setAccepted(false); }} />
+                <span className="plan-name"><span className="eyebrow">STARTER</span><strong>A$1</strong><small>one time</small></span>
+                <span className="plan-description"><strong>2 successful cover letters</strong><small>One purchase per account. Credits do not expire. This is not a subscription or a free trial.</small></span>
+              </label>
+            </>
           )}
+          {/* eslint-disable-next-line jsx-a11y/label-has-associated-control -- The radio input is wrapped by this option label. */}
           <label className={cx("plan-gate-option", selectedPlan === "monthly" && "selected")}>
             <input type="radio" name="continuation-plan" value="monthly" checked={selectedPlan === "monthly"} onChange={() => { setSelectedPlan("monthly"); setAccepted(false); }} />
             <span className="plan-name"><span className="eyebrow">PLUS</span><strong>A$20</strong><small>per month</small></span>
@@ -1346,6 +1363,10 @@ function CheckoutReturn({ api, enabled, onBilling }) {
   const [status, setStatus] = useState("checking");
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
+  const onBillingRef = useRef(onBilling);
+  useEffect(() => {
+    onBillingRef.current = onBilling;
+  }, [onBilling]);
   useEffect(() => {
     if (!returnState || !enabled) return;
     let active = true,
@@ -1356,7 +1377,7 @@ function CheckoutReturn({ api, enabled, onBilling }) {
     const check = async () => {
       try {
         const billing = await refreshBillingStatus(api, {
-          onBilling,
+          onBilling: (billing) => onBillingRef.current(billing),
           assertCurrent() {
             if (!active) throw new Error("The payment check was cancelled.");
           },
@@ -1365,7 +1386,7 @@ function CheckoutReturn({ api, enabled, onBilling }) {
         setStatus(next);
         checks += 1;
         if (next === "waiting" && checks < 3)
-          timer = setTimeout(check, 11000);
+          timer = setTimeout(() => void check(), 11000);
       } catch (err) {
         if (active) {
           setError(err);
@@ -1373,7 +1394,7 @@ function CheckoutReturn({ api, enabled, onBilling }) {
         }
       }
     };
-    check();
+    void check();
     return () => {
       active = false;
       clearTimeout(timer);
@@ -2419,67 +2440,75 @@ export function OpportunitiesScreen({
   const decisionPending = useRef(false);
   const initialSelectedRequest = useRef(null);
   const selectedLoaded = useRef(false);
-  currentView.current = view;
+  const selectView = useCallback((nextView) => {
+    if (currentView.current === nextView) return;
+    currentView.current = nextView;
+    loadSerial.current += 1;
+    setView(nextView);
+  }, []);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
-  async function load({ refresh = false, initial = false } = {}) {
-    if (!mounted.current) return;
-    const serial = ++loadSerial.current;
-    const requestedView = currentView.current;
-    const request = opportunityLoadRequest(requestedView, {
-      recommendations: capabilities.recommendations,
-      refresh,
-      initial,
-      selectedLoaded: selectedLoaded.current,
-    });
-    const refreshSelected = request.options?.method === "POST";
-    const assertSession = captureSessionGuard();
-    const isCurrent = () =>
-      mounted.current &&
-      serial === loadSerial.current &&
-      requestedView === currentView.current;
-    setLoading(true);
-    setError(null);
-    try {
-      assertSession();
-      let pending;
-      if (refreshSelected && initial && !refresh) {
-        if (!initialSelectedRequest.current) {
-          const firstRequest = api(request.path, request.options);
-          initialSelectedRequest.current = firstRequest;
-          firstRequest.catch(() => {
-            if (initialSelectedRequest.current === firstRequest)
-              initialSelectedRequest.current = null;
-          });
+  const load = useCallback(
+    async ({ refresh = false, initial = false } = {}) => {
+      if (!mounted.current) return;
+      const serial = ++loadSerial.current;
+      const requestedView = currentView.current;
+      const request = opportunityLoadRequest(requestedView, {
+        recommendations: capabilities.recommendations,
+        refresh,
+        initial,
+        selectedLoaded: selectedLoaded.current,
+      });
+      const refreshSelected = request.options?.method === "POST";
+      const assertSession = captureSessionGuard();
+      const isCurrent = () =>
+        mounted.current &&
+        serial === loadSerial.current &&
+        requestedView === currentView.current;
+      setLoading(true);
+      setError(null);
+      try {
+        assertSession();
+        let pending;
+        if (refreshSelected && initial && !refresh) {
+          if (!initialSelectedRequest.current) {
+            const firstRequest = api(request.path, request.options);
+            initialSelectedRequest.current = firstRequest;
+            firstRequest.catch(() => {
+              if (initialSelectedRequest.current === firstRequest)
+                initialSelectedRequest.current = null;
+            });
+          }
+          pending = initialSelectedRequest.current;
+        } else {
+          pending = api(request.path, request.options);
         }
-        pending = initialSelectedRequest.current;
-      } else {
-        pending = api(request.path, request.options);
+        const result = await pending;
+        assertSession();
+        if (isCurrent()) {
+          setData(result);
+          if (requestedView === "selected" && capabilities.recommendations)
+            selectedLoaded.current = true;
+        }
+      } catch (err) {
+        if (isCurrent()) setError(err);
+      } finally {
+        if (isCurrent()) setLoading(false);
       }
-      const result = await pending;
-      assertSession();
-      if (isCurrent()) {
-        setData(result);
-        if (requestedView === "selected" && capabilities.recommendations)
-          selectedLoaded.current = true;
-      }
-    } catch (err) {
-      if (isCurrent()) setError(err);
-    } finally {
-      if (isCurrent()) setLoading(false);
-    }
-  }
+    },
+    [api, capabilities.recommendations],
+  );
   useEffect(() => {
     setData(null);
-    load({ initial: view === "selected" });
+    void load({ initial: view === "selected" });
     return () => {
       loadSerial.current += 1;
     };
-  }, [view, capabilities.recommendations]);
+  }, [load, view]);
   async function decision(match, value) {
     if (decisionPending.current) return;
     decisionPending.current = true;
@@ -2604,7 +2633,7 @@ export function OpportunitiesScreen({
           <button
             className={cx(view === "selected" && "active")}
             aria-pressed={view === "selected"}
-            onClick={() => setView("selected")}
+            onClick={() => selectView("selected")}
           >
             Selected for you
             {view === "selected" && data && <span>{opportunities.length}</span>}
@@ -2612,7 +2641,7 @@ export function OpportunitiesScreen({
           <button
             className={cx(view === "ignored" && "active")}
             aria-pressed={view === "ignored"}
-            onClick={() => setView("ignored")}
+            onClick={() => selectView("ignored")}
           >
             Ignored
           </button>
@@ -2631,7 +2660,7 @@ export function OpportunitiesScreen({
             className="icon-button bordered"
             disabled={loading}
             onClick={() =>
-              load({
+              void load({
                 refresh:
                   view === "selected" && capabilities.recommendations,
               })
@@ -2809,7 +2838,7 @@ export function OpportunitiesScreen({
           api={api}
           onClose={() => setImportOpen(false)}
           onAccepted={async () => {
-            setView("selected");
+            selectView("selected");
             if (view === "selected") await load();
             onNotice(
               "Opportunity assessed and added to your shortlist. Review the reasons before choosing Interested.",
@@ -3081,12 +3110,16 @@ function ImportOpportunityDialog({ api, onClose, onAccepted }) {
 
 function Dialog({ title, children, onClose, className = "", footer }) {
   const ref = useRef(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     const dialog = ref.current;
     dialog.showModal();
     const cancel = (e) => {
       e.preventDefault();
-      onClose();
+      onCloseRef.current();
     };
     dialog.addEventListener("cancel", cancel);
     return () => {
@@ -3095,12 +3128,13 @@ function Dialog({ title, children, onClose, className = "", footer }) {
     };
   }, []);
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- Native dialog handles Escape; this click handler closes only the backdrop.
     <dialog
       ref={ref}
       className={cx("dialog", className)}
       aria-label={title}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) onCloseRef.current();
       }}
     >
       <div className="dialog-shell">
@@ -3129,7 +3163,7 @@ function MatchEvidence({ match }) {
         ["gaps", "Gaps to consider", SlidersHorizontal, "gap"],
         ["needsConfirmation", "Needs confirmation", CircleHelp, "unknown"],
       ].map(([key, title, Icon, tone]) => (
-        <section key={key} className={`evidence-section ${tone}`}>
+        <section key={key} className={cx("evidence-section", tone)}>
           <h3>
             <Icon size={19} />
             {title}
@@ -3281,7 +3315,7 @@ function ApplicationsScreen({
     [error, setError] = useState(null),
     [loading, setLoading] = useState(true);
   const loadSerial = useRef(0);
-  async function load() {
+  const load = useCallback(async () => {
     const serial = ++loadSerial.current;
     const assertSession = captureSessionGuard();
     const assertCurrent = () => {
@@ -3303,18 +3337,25 @@ function ApplicationsScreen({
     } finally {
       if (serial === loadSerial.current) setLoading(false);
     }
-  }
+  }, [api, initialSelectedId]);
   useEffect(() => {
-    load();
+    void load();
     return () => {
       loadSerial.current += 1;
     };
-  }, [initialSelectedId]);
+  }, [load]);
   const application = applications?.find((a) => a.id === selectedId);
-  const update = (next) =>
-    setApplications((list) =>
-      list.map((a) => (a.id === next.id ? mergeApplicationUpdate(a, next) : a)),
-    );
+  const update = useCallback(
+    (next) =>
+      setApplications((list) =>
+        list.map((application) =>
+          application.id === next.id
+            ? mergeApplicationUpdate(application, next)
+            : application,
+        ),
+      ),
+    [],
+  );
   return (
     <div className="page">
       <div className="page-heading">
@@ -3337,7 +3378,11 @@ function ApplicationsScreen({
       </div>
       <ErrorBox error={error} />
       {error && (
-        <button className="button secondary" disabled={loading} onClick={load}>
+        <button
+          className="button secondary"
+          disabled={loading}
+          onClick={() => void load()}
+        >
           {loading ? <Spinner>Retrying</Spinner> : "Retry loading applications"}
         </button>
       )}
@@ -3446,39 +3491,44 @@ export function ApplicationWorkspace({
     } catch {
       /* Corrupt request state can be replaced by a new explicit request. */
     }
-  }, []);
-  function generationResult(result) {
-    if (result.billing) onBilling(result.billing);
-    const value = result.generation;
-    setGeneration(value);
-    if (value.status === "succeeded" && value.letter) {
-      sessionStorage.removeItem(generationKey);
-      const letters = [
-        ...(application.letters || []).filter((l) => l.id !== value.letter.id),
-        value.letter,
-      ];
-      onUpdate({ ...application, letters });
-      setLetterId(value.letter.id);
-      setText(value.letter.text);
-      setBusy("");
-      onNotice("Your cover-letter draft is ready. Review it before using it.");
-    } else if (value.status === "failed") {
-      sessionStorage.removeItem(generationKey);
-      setBusy("");
-      setError(new Error(generationFailureMessage(value)));
-    } else if (value.status === "pending") {
-      let saved;
-      try {
-        saved = JSON.parse(sessionStorage.getItem(generationKey) || "{}");
-      } catch {
-        saved = {};
+  }, [generationKey]);
+  const generationResult = useCallback(
+    (result) => {
+      if (result.billing) onBilling(result.billing);
+      const value = result.generation;
+      setGeneration(value);
+      if (value.status === "succeeded" && value.letter) {
+        sessionStorage.removeItem(generationKey);
+        const letters = [
+          ...(application.letters || []).filter(
+            (letter) => letter.id !== value.letter.id,
+          ),
+          value.letter,
+        ];
+        onUpdate({ ...application, letters });
+        setLetterId(value.letter.id);
+        setText(value.letter.text);
+        setBusy("");
+        onNotice("Your cover-letter draft is ready. Review it before using it.");
+      } else if (value.status === "failed") {
+        sessionStorage.removeItem(generationKey);
+        setBusy("");
+        setError(new Error(generationFailureMessage(value)));
+      } else if (value.status === "pending") {
+        let saved;
+        try {
+          saved = JSON.parse(sessionStorage.getItem(generationKey) || "{}");
+        } catch {
+          saved = {};
+        }
+        sessionStorage.setItem(
+          generationKey,
+          JSON.stringify({ ...saved, generationId: value.id }),
+        );
       }
-      sessionStorage.setItem(
-        generationKey,
-        JSON.stringify({ ...saved, generationId: value.id }),
-      );
-    }
-  }
+    },
+    [application, generationKey, onBilling, onNotice, onUpdate],
+  );
   useEffect(() => {
     if (generation?.status !== "pending") return;
     let cancelled = false,
@@ -3504,7 +3554,7 @@ export function ApplicationWorkspace({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [generation?.id, generation?.status]);
+  }, [api, generation?.id, generation?.status, generationResult]);
   async function generate() {
     let saved;
     try {

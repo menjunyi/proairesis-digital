@@ -110,7 +110,7 @@ export function createFreehireSearch(env, dependencies = {}) {
     && typeof env.FREEHIRE_LICENSE_REFERENCE === 'string' && Boolean(env.FREEHIRE_LICENSE_REFERENCE.trim());
   return {
     available: async () => enabled(),
-    async search(profile, guest = {}) {
+    async search(profile, _guest = {}) {
       if (!enabled()) throw new FreehireError('JOB_SEARCH_NOT_CONFIGURED', 'Live job search is awaiting source approval. No sample jobs were substituted.');
       const categories = [...new Set((profile.roleFamilies ?? []).flatMap(family => FAMILY_CATEGORIES[family] ?? []))];
       if (!categories.length) return {jobs: [], source: {name: 'Freehire', status: 'ready'}};

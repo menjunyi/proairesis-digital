@@ -59,6 +59,7 @@ test('known job-board URL variants have the same stable ID and non-job board lin
 
 test('employer links preserve job selectors while dropping only known tracking and fragments', () => {
   assert.equal(canonicalJobUrl('https://Careers.example.org/opening?job=42&team=engineering&utm_source=email#description'), 'https://careers.example.org/opening?job=42&team=engineering');
+  assert.equal(canonicalJobUrl('https://careers.example.org/opening?job=42&utm_source=email&gclid=paid&fbclid=social&team=engineering'), 'https://careers.example.org/opening?job=42&team=engineering');
   const first = normalizeImportedJob({...input, url: 'https://careers.example.org/?job=42'});
   const second = normalizeImportedJob({...input, url: 'https://careers.example.org/?job=43'});
   assert.notEqual(first.id, second.id);

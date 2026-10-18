@@ -33,7 +33,7 @@ test('scheduled repair recovers an abandoned dispatch without browser polling an
   const pending=await f.service.generate(user,job.id,randomUUID());
   assert.equal(pending.generation.pendingReason,'DISPATCH_OUTCOME_UNKNOWN');
   assert.equal((await f.store.list(GENERATION_OUTBOX_PK)).length,1);
-  let row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
+  const row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
   await f.store.transact([change(row.pk,row.sk,row,{...row.value,dispatchLeaseUntil:oldIso()})]);
   const repaired=await processGenerationRepair(f.service,{log:()=>{}});
   assert.equal(repaired.requeued,1);
@@ -70,7 +70,7 @@ test('generation creation and concurrent repair are idempotent and duplicate que
   assert.equal(replay.generation.id,first.generation.id);
   assert.equal((await f.store.list(GENERATION_OUTBOX_PK)).length,1);
   assert.equal(queued.length,1);
-  let row=await f.store.get('USER#alice',`GEN#${first.generation.id}`);
+  const row=await f.store.get('USER#alice',`GEN#${first.generation.id}`);
   await f.store.transact([change(row.pk,row.sk,row,{...row.value,dispatchedAt:oldIso()})]);
   const repairs=await Promise.all([f.service.repairPendingGenerations(),f.service.repairPendingGenerations()]);
   assert.equal(repairs.reduce((total,result)=>total+result.requeued,0),1);
@@ -132,7 +132,7 @@ test('provider-started unknown work is never dispatched or generated again and e
   const previous=console.error;console.error=()=>{};
   try{assert.deepEqual(await processGenerationBatch(f.service,{Records:[record('provider-unknown',queued[0])]}),{batchItemFailures:[{itemIdentifier:'provider-unknown'}]});}
   finally{console.error=previous;}
-  let row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
+  const row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
   await f.store.transact([change(row.pk,row.sk,row,{...row.value,leaseExpiresAt:oldIso()})]);
   const logs=[],result=await processGenerationRepair(f.service,{log:value=>logs.push(JSON.parse(value))});
   assert.equal(result.requeued,0);
@@ -149,7 +149,7 @@ test('provider-started unknown work is never dispatched or generated again and e
 test('dispatch repair failures are alarmable without logging a tenant subject',async()=>{
   let dispatchCalls=0;const f=await fixture({dispatch:async()=>{dispatchCalls++;throw Error('queue unavailable');}});
   const pending=await f.service.generate(user,job.id,randomUUID());
-  let row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
+  const row=await f.store.get('USER#alice',`GEN#${pending.generation.id}`);
   await f.store.transact([change(row.pk,row.sk,row,{...row.value,dispatchLeaseUntil:oldIso()})]);
   const logs=[],result=await processGenerationRepair(f.service,{log:value=>logs.push(JSON.parse(value))});
   assert.equal(result.failures.length,1);

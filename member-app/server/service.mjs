@@ -110,7 +110,7 @@ function safeString(v,max=250){return typeof v==='string'?v.trim().slice(0,max):
 function strings(v,max=20){return Array.isArray(v)?v.filter(x=>typeof x==='string').map(x=>safeString(x,200)).filter(Boolean).slice(0,max):[];}
 function mergeResumeEvidence(existing,email,parsed){
   const base={...blankProfile(email),...existing},suggested=suggestProfileFromResume(parsed.text,parsed.skills).values;
-  const location=safeString(base.location)||suggested.location,preferences={...blankProfile(email).preferences,...(base.preferences??{})};
+  const location=safeString(base.location)||suggested.location,preferences={...blankProfile(email).preferences,...base.preferences};
   if(!preferences.locations?.length&&location)preferences.locations=[location];
   if(!preferences.roleTitles?.length&&suggested.roleTitles.length)preferences.roleTitles=suggested.roleTitles;
   return {...base,
@@ -146,7 +146,20 @@ function cleanProfile(input,existing,email){
   assertProfileSize(p);return p;
 }
 function publicGeneration(value){
-  const {profileSnapshot,jobSnapshot,lease,leaseId,leaseExpiresAt,dispatchAttemptId,dispatchAttemptedAt,dispatchLeaseUntil,dispatchAttempts,dispatchedAt,providerStartedAt,...generation}=value;
+  const {
+    profileSnapshot:_profileSnapshot,
+    jobSnapshot:_jobSnapshot,
+    lease:_lease,
+    leaseId:_leaseId,
+    leaseExpiresAt:_leaseExpiresAt,
+    dispatchAttemptId:_dispatchAttemptId,
+    dispatchAttemptedAt:_dispatchAttemptedAt,
+    dispatchLeaseUntil:_dispatchLeaseUntil,
+    dispatchAttempts:_dispatchAttempts,
+    dispatchedAt:_dispatchedAt,
+    providerStartedAt:_providerStartedAt,
+    ...generation
+  }=value;
   return generation;
 }
 
@@ -502,7 +515,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       if(claimRow&&claimRow.value.applicationId!==id)fail(409,'GUEST_ALREADY_CLAIMED','This guest session has already been claimed.');
       const newImports=importedRows.filter(row=>!row).length;
       if((counter?.value.count??0)+newImports>200)fail(429,'IMPORT_LIMIT','You have reached the 200 saved-job limit. Contact support before adding more.');
-      const {job:duplicateJob,...match}=assessment,application=app?.value??{id,job,match,status:'interested',notes:'',createdAt:iso(),updatedAt:iso(),letters:[]};
+      const {job:_duplicateJob,...match}=assessment,application=app?.value??{id,job,match,status:'interested',notes:'',createdAt:iso(),updatedAt:iso(),letters:[]};
       const entitlement=await store.get(userPk,'ENTITLEMENT'),view=billingView(entitlement?.value??blankEntitlement()),continuation={pendingApplicationId:id,status:view.canGenerate?'ready':'awaiting-payment',guestClaimedAt:iso(),updatedAt:iso(),...(view.canGenerate?{readyAt:iso()}:{})};
       const claimedAt=iso(),claimed={version:guest.version,createdAt:guest.createdAt,expiresAt:guest.expiresAt,stage:'claimed',selectedJobId:id,claimedApplicationId:id,claimedUserHash:userHash,claimedAt};
       const changes=[change(initial.pk,'SESSION',guestRow,claimed),change(userPk,'PROFILE',profileRow,profile),change(RECOMMENDATION_REGISTRY_PK,user.sub,registry,{userSub:user.sub}),change(userPk,`DECISION#${id}`,decision,{decision:'interested',updatedAt:iso()}),change(userPk,'CONTINUATION',continuationRow,continuation)];
@@ -574,7 +587,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
   async function refreshRecommendationsForSub(userSub,{force=false,background=false}={}){
     if(!validUserSub(userSub))throw Error('Invalid recommendation user subject');
     const pk=`USER#${userSub}`;try{await assertActive(pk);}catch(error){if(['ACCOUNT_DELETED','ACCOUNT_DELETING'].includes(error?.code)){await removeRecommendationRegistration(userSub);return {skipped:true,reason:error.code};}throw error;}
-    let profileRow=await store.get(pk,'PROFILE');
+    const profileRow=await store.get(pk,'PROFILE');
     if(!profileRow?.value.confirmed){await removeRecommendationRegistration(userSub);return {skipped:true,reason:'PROFILE_NOT_CONFIRMED'};}
     await ensureRecommendationRegistration(userSub);
     let cache=await readRecommendationCache(pk,profileRow.value);
@@ -623,7 +636,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     const pk=pkOf(user),profile=(await store.get(pk,'PROFILE'))?.value;await assertActive(pk);
     const searchAvailable=await sourceAvailable(),legacyStatus=feed?.status?await feed.status():{status:'not-configured',lastUpdatedAt:null};
     if(!profile?.confirmed)return {opportunities:[],feed:searchAvailable?recommendationFeed(null):legacyStatus,excludedCount:0};
-    if(searchAvailable){await ensureRecommendationRegistration(user.sub);let cache=await readRecommendationCache(pk,profile);if(refresh&&(force||refreshDue(cache)))await refreshRecommendationsForSub(user.sub,{force});}
+    if(searchAvailable){await ensureRecommendationRegistration(user.sub);const cache=await readRecommendationCache(pk,profile);if(refresh&&(force||refreshDue(cache)))await refreshRecommendationsForSub(user.sub,{force});}
     const cache=await readRecommendationCache(pk,profile),cachedMatches=cache.valid?cache.assessments:[],legacyJobs=feed?.jobs?await feed.jobs():[],importedJobs=(await store.list(pk,'IMPORTED_JOB#')).map(row=>row.value),decisions=new Map((await store.list(pk,'DECISION#')).map(row=>[row.sk.slice(9),row.value]));
     const ranked=[],seen=new Set(),emitted=new Set();let excludedCount=cache.state?.excludedCount??0;
     for(const match of cachedMatches){const id=match.job.id,decision=decisions.get(id)?.decision;seen.add(id);if(ignored?decision==='ignored':!decision||decision==='undecided'){ranked.push(match);emitted.add(id);}}
@@ -680,7 +693,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       }
       if(input.decision==='undecided'&&storedAssessment)decisionValue.assessmentSnapshot=cachedAssessment??storedAssessment;
       const changes=[change(pk,`DECISION#${id}`,row,decisionValue)];
-      if(input.decision==='interested'&&!app){const match=profile&&assess(profile,job);if(!match||!profile.confirmed)fail(409,'PROFILE_OR_JOB_CHANGED','Review your profile and refreshed opportunities first.');const {job:duplicateJob,...matchDetails}=match;application={id,job,match:matchDetails,status:'interested',notes:'',createdAt:iso(),updatedAt:iso(),letters:[]};changes.push(change(pk,`APP#${id}`,null,application));}
+      if(input.decision==='interested'&&!app){const match=profile&&assess(profile,job);if(!match||!profile.confirmed)fail(409,'PROFILE_OR_JOB_CHANGED','Review your profile and refreshed opportunities first.');const {job:_duplicateJob,...matchDetails}=match;application={id,job,match:matchDetails,status:'interested',notes:'',createdAt:iso(),updatedAt:iso(),letters:[]};changes.push(change(pk,`APP#${id}`,null,application));}
       await store.transact(changes);return {application};
     });
   }
@@ -753,7 +766,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(index<rows.length)page.nextCursor=nextPageCursor({...state,index,letterOffset});
     return assertPageFits(page);
   }
-  async function updateApplication(user,id,input){const pk=pkOf(user);return retryConflict(async()=>{await assertActive(pk);const row=await store.get(pk,`APP#${id}`);if(!row)fail(404,'NOT_FOUND','Application not found.');const application={...row.value,updatedAt:iso()};if('status'in input){if(!['interested','preparing','applied','interview','offer','closed'].includes(input.status))fail(400,'INVALID_STATUS','Choose a valid application status.');application.status=input.status;}if('notes'in input)application.notes=safeString(input.notes,10000);await store.transact([change(pk,`APP#${id}`,row,application)]);const {letters,...metadata}=application;return {application:{...metadata,job:jobAvailability(application.job,await availabilityContext(pk))}};});}
+  async function updateApplication(user,id,input){const pk=pkOf(user);return retryConflict(async()=>{await assertActive(pk);const row=await store.get(pk,`APP#${id}`);if(!row)fail(404,'NOT_FOUND','Application not found.');const application={...row.value,updatedAt:iso()};if('status'in input){if(!['interested','preparing','applied','interview','offer','closed'].includes(input.status))fail(400,'INVALID_STATUS','Choose a valid application status.');application.status=input.status;}if('notes'in input)application.notes=safeString(input.notes,10000);await store.transact([change(pk,`APP#${id}`,row,application)]);const {letters:_letters,...metadata}=application;return {application:{...metadata,job:jobAvailability(application.job,await availabilityContext(pk))}};});}
   async function scheduleGeneration(sub,id,{repair=false}={}){
     if(!dispatch)return runGeneration(sub,id);
     const pk=`USER#${sub}`,attemptId=randomUUID(),attemptedAt=iso(),dispatchLeaseUntil=new Date(Date.now()+DISPATCH_LEASE_MS).toISOString();
@@ -969,7 +982,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     await assertActive(pkOf(user));const records=[],semanticRows=[];
     for(const row of await store.list(pkOf(user))){
       let value;
-      if(row.sk==='PROFILE'){const {resumeObjectKey,resumeUploadId,...profile}=row.value;value=profile;}
+      if(row.sk==='PROFILE'){const {resumeObjectKey:_resumeObjectKey,resumeUploadId:_resumeUploadId,...profile}=row.value;value=profile;}
       else if(row.sk==='ENTITLEMENT')value=billingView(row.value);
       else if(/^(APP#|LETTER#|DECISION#|IMPORTED_JOB#)/.test(row.sk))value=row.value;
       else if(row.sk.startsWith('GEN#'))value=publicGeneration(row.value);

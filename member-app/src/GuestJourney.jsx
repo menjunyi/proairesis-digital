@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   CircleHelp,
   Clock3,
-  FileText,
   Heart,
   LoaderCircle,
   MapPin,
@@ -271,7 +270,7 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
   const setPreference = (key, value) => {
     setDraft((current) => ({
       ...current,
-      preferences: { ...(current.preferences || {}), [key]: value },
+      preferences: { ...current.preferences, [key]: value },
     }));
     setReviewed(false);
   };
@@ -280,7 +279,7 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
       ...current,
       location: value,
       preferences: {
-        ...(current.preferences || {}),
+        ...current.preferences,
         locations: value.trim() ? [value] : [],
         locationsRequired: Boolean(value.trim()),
       },

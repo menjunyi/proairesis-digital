@@ -130,7 +130,20 @@ export async function reconcileGeneration({
       throw new OperatorError('APPLICATION_MISSING', 'The application is missing; a recovered letter cannot be attached safely.');
     }
     const timestamp = new Date(now).toISOString();
-    const {profileSnapshot, jobSnapshot, lease, leaseId, leaseExpiresAt, dispatchAttemptId, dispatchAttemptedAt, dispatchLeaseUntil, dispatchAttempts, dispatchedAt, providerStartedAt, ...safeGeneration} = g;
+    const {
+      profileSnapshot: _profileSnapshot,
+      jobSnapshot: _jobSnapshot,
+      lease: _lease,
+      leaseId: _leaseId,
+      leaseExpiresAt: _leaseExpiresAt,
+      dispatchAttemptId: _dispatchAttemptId,
+      dispatchAttemptedAt: _dispatchAttemptedAt,
+      dispatchLeaseUntil: _dispatchLeaseUntil,
+      dispatchAttempts: _dispatchAttempts,
+      dispatchedAt: _dispatchedAt,
+      providerStartedAt: _providerStartedAt,
+      ...safeGeneration
+    } = g;
     const letter = text ? {id: generationId, text, createdAt: timestamp, editedAt: null} : null;
     const updated = {
       ...safeGeneration,

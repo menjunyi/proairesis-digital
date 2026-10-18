@@ -57,6 +57,48 @@
   "overrides": [
     {
       "files": [
+        "**/tests/**/*.test.mjs"
+      ],
+      "rules": {
+        "typescript/no-floating-promises": [
+          "error",
+          {
+            "allowForKnownSafeCalls": [
+              {
+                "from": "package",
+                "name": "test",
+                "package": "node:test"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "member-app/src/**/*.jsx"
+      ],
+      "rules": {
+        "jsx-a11y/prefer-tag-over-role": "off",
+        "react/react-compiler": "off"
+      }
+    },
+    {
+      "files": [
+        "member-app/scripts/ai-budget.mjs",
+        "member-app/server/freehire.mjs",
+        "member-app/server/handler.mjs",
+        "member-app/server/imported-jobs.mjs",
+        "member-app/server/operator.mjs",
+        "member-app/server/resume.mjs",
+        "member-app/server/service.mjs"
+      ],
+      "rules": {
+        "no-control-regex": "off"
+      }
+    },
+    {
+      "files": [
         "components/ui/**",
         "hooks/use-mobile.ts"
       ],

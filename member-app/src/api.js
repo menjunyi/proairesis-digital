@@ -329,7 +329,11 @@ export async function fileToBase64(file, timeoutMs = 20000) {
       if (reader.readyState === FileReader.LOADING) reader.abort();
     }, timeoutMs);
     reader.onload = () => {
-      const encoded = String(reader.result).split(",")[1];
+      if (typeof reader.result !== "string") {
+        finish(new Error("Could not read that file. Choose another resume."));
+        return;
+      }
+      const encoded = reader.result.split(",")[1];
       finish(
         encoded ? null : new Error("Could not read that file. Choose another resume."),
         encoded,
@@ -399,7 +403,15 @@ export async function uploadResume(api, config, file) {
         if (reader.readyState === FileReader.LOADING) reader.abort();
       }, 15000);
       reader.onload = () => {
-        const encoded = String(reader.result).split(",")[1];
+        if (typeof reader.result !== "string") {
+          finish(
+            new Error(
+              "Could not read that file. Please choose another resume.",
+            ),
+          );
+          return;
+        }
+        const encoded = reader.result.split(",")[1];
         if (!encoded)
           finish(
             new Error(
