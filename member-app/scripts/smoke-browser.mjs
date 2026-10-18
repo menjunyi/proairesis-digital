@@ -233,9 +233,32 @@ async function browserRound(parameters) {
     if (new URL(await page.url()).origin !== parameters.siteUrl)
       throw new Error("Wrong origin");
     const occupied = await page.evaluate(() =>
-      Boolean(sessionStorage.getItem("roleclue.session.v1")),
+      Boolean(
+        sessionStorage.getItem("roleclue.session.v1") ||
+          sessionStorage.getItem("roleclue.guest.v1") ||
+          sessionStorage.getItem("roleclue.continuation.v1"),
+      ),
     );
-    if (occupied) throw new Error("Existing session; do not change it");
+    if (occupied) throw new Error("Existing browser state; do not change it");
+    await page.waitForFunction(
+      () =>
+        Boolean(document.querySelector('input[type="email"]')) ||
+        [...document.querySelectorAll("button")].some(
+          (button) =>
+            button.textContent?.trim() ===
+            "Already have an account? Sign in",
+        ),
+      undefined,
+      { timeout: 30_000 },
+    );
+    const guestJourneyIsOpen = await page.evaluate(
+      () => !document.querySelector('input[type="email"]'),
+    );
+    if (guestJourneyIsOpen) {
+      await page.click(
+        "loc=role:button[name='Already have an account? Sign in']",
+      );
+    }
     await page.waitForSelector('input[type="email"]', {
       state: "visible",
       timeout: 30_000,
@@ -501,7 +524,7 @@ async function browserRound(parameters) {
 }
 
 export function browserProgram(parameters) {
-  return `await (${browserRound.toString()})(${JSON.stringify(parameters)});\n`;
+  return `(async () => { await (${browserRound.toString()})(${JSON.stringify(parameters)}); })();\n`;
 }
 
 async function runBrowser(parameters, control) {
@@ -512,6 +535,7 @@ async function runBrowser(parameters, control) {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "",
+      stderr = "",
       finished = false;
     control.browserChild = child;
     const finish = (error, result) => {
@@ -534,14 +558,25 @@ async function runBrowser(parameters, control) {
       finish(new SmokeCheckError("ego-browser could not start")),
     );
     child.stdin.on("error", () => {});
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (Buffer.byteLength(stdout) > 2 * 1024 * 1024) {
+    const retainPrivateOutput = (stream, chunk) => {
+      if (stream === "stdout") stdout += chunk;
+      else stderr += chunk;
+      if (
+        Buffer.byteLength(stdout) + Buffer.byteLength(stderr) >
+        2 * 1024 * 1024
+      ) {
         child.kill("SIGTERM");
         finish(new SmokeCheckError("Browser output exceeded its safe limit"));
       }
-    });
-    child.stderr.on("data", () => {}); // Never echo CLI diagnostics or source.
+    };
+    child.stdout.on("data", (chunk) =>
+      retainPrivateOutput("stdout", chunk),
+    );
+    // Ego Lite can route console output through stderr. Retain it only in this
+    // bounded private buffer so the receipt can be parsed; never echo it.
+    child.stderr.on("data", (chunk) =>
+      retainPrivateOutput("stderr", chunk),
+    );
     child.on("close", (code) => {
       if (code !== 0)
         return finish(
@@ -550,7 +585,7 @@ async function runBrowser(parameters, control) {
           ),
         );
       try {
-        const lines = stdout
+        const lines = `${stdout}\n${stderr}`
           .split(/\r?\n/)
           .filter((line) => line.startsWith(receiptPrefix));
         check(lines.length === 1, "Browser receipt was missing or ambiguous");

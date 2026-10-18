@@ -145,8 +145,20 @@ test('browser smoke requires a portable task target and uses the normal AWS prof
   assert.equal(browserAwsProfile({ GITHUB_ACTIONS: 'true' }), '');
   assert.equal(browserAwsProfile({ AWS_PROFILE: 'release-review' }), 'release-review');
   const program = browserProgram({ taskSpaceId: 417, pageLabel: 'acceptance-1', phase: 'preflight', siteUrl: 'https://app.proairesis.digital' });
+  assert.match(program, /^\(async \(\) => \{ await /);
   assert.match(program, /taskSpace\(parameters\.taskSpaceId\)/);
   assert.doesNotMatch(program, /taskSpace\(82\)/);
+  assert.match(program, /roleclue\.session\.v1/);
+  assert.match(program, /roleclue\.guest\.v1/);
+  assert.match(program, /roleclue\.continuation\.v1/);
+  assert.match(program, /Already have an account\? Sign in/);
+  assert.match(program, /guestJourneyIsOpen/);
+  assert.ok(program.indexOf('roleclue.guest.v1') < program.indexOf('guestJourneyIsOpen'));
+  assert.ok(program.indexOf('roleclue.continuation.v1') < program.indexOf('guestJourneyIsOpen'));
+  const smokeSource = readFileSync(new URL('../scripts/smoke-browser.mjs', import.meta.url), 'utf8');
+  assert.match(smokeSource, /retainPrivateOutput\("stderr", chunk\)/);
+  assert.match(smokeSource, /`\$\{stdout\}\\n\$\{stderr\}`/);
+  assert.doesNotMatch(smokeSource, /console\.log\(stderr\)/);
 });
 
 test('paid generations and recommendation refreshes select separate queues', () => {
