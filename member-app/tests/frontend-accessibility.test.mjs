@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const module = { exports: {} };
+const appModule = { exports: {} };
 const compiled = buildSync({
   entryPoints: [fileURLToPath(new URL("../src/App.jsx", import.meta.url))],
   bundle: true,
@@ -15,13 +16,13 @@ const compiled = buildSync({
   packages: "external",
   write: false,
 }).outputFiles[0].text;
-new Function("require", "module", "exports", compiled)(
-  createRequire(import.meta.url),
-  module,
-  module.exports,
-);
+runInNewContext(compiled, {
+  require: createRequire(import.meta.url),
+  module: appModule,
+  exports: appModule.exports,
+});
 
-const { ApplicationWorkspace, AuthScreen, OpportunitiesScreen } = module.exports;
+const { ApplicationWorkspace, AuthScreen, OpportunitiesScreen } = appModule.exports;
 const capabilities = {
   recommendations: false,
   guestDiscovery: false,

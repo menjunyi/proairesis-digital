@@ -144,7 +144,11 @@ export function createAiBudget({store, namespace = 'SYSTEM#EXTERNAL_AI', now = (
   }
 
   function auditReference(value) {
-    return typeof value === 'string' && value.trim().length > 0 && value.length <= 250 && !/[\x00-\x1f\x7f]/.test(value);
+    return typeof value === 'string' && value.trim().length > 0 && value.length <= 250 &&
+      Array.from(value).every(character => {
+        const codePoint = character.codePointAt(0);
+        return codePoint > 0x1f && codePoint !== 0x7f;
+      });
   }
 
   async function reserveExternal({requestId, reservedMicros, service, reference, quotedCnyFen, fxReference}) {

@@ -118,7 +118,7 @@ export function createFeed(store,env,dependencies={}){
       const row=await store.get('FEED#catalog','STATUS');
       if(!row)return {status:'pending',lastUpdatedAt:null,message:'The first job-source refresh is pending.'};
       const stale=Date.now()-Date.parse(row.value.lastUpdatedAt)>maxAge;
-      const {snapshotKey,metadata,...publicState}=row.value;
+      const publicState={...row.value};delete publicState.snapshotKey;delete publicState.metadata;
       return {...publicState,status:stale?'stale':row.value.status,message:stale?'The job source is out of date. New recommendations are paused.':row.value.message};
     },
     async jobs(){
@@ -148,7 +148,7 @@ export function createFeed(store,env,dependencies={}){
         if(before?.value.snapshotKey)await store.removePartition(before.value.snapshotKey);
         return {count:jobs.length};
       }catch(e){
-        await retryConflict(async()=>{const row=await store.get('FEED#catalog','STATUS');await store.transact([change('FEED#catalog','STATUS',row,{...(row?.value??{}),status:row?.value.lastUpdatedAt?'degraded':'unavailable',message:'The last source refresh failed. Previously verified jobs may remain until their freshness limit.'})]);});throw e;
+        await retryConflict(async()=>{const row=await store.get('FEED#catalog','STATUS');await store.transact([change('FEED#catalog','STATUS',row,{...row?.value,status:row?.value.lastUpdatedAt?'degraded':'unavailable',message:'The last source refresh failed. Previously verified jobs may remain until their freshness limit.'})]);});throw e;
       }finally{const row=await store.get('FEED#catalog','LOCK');if(row?.value.owner===owner)await store.transact([{pk:row.pk,sk:row.sk,expected:row.revision,remove:true}]);}
     }
   };
@@ -161,7 +161,7 @@ export async function createFiles(bucket,dependencies={}){
     async put(sub,filename,contentType,bytes){const key=`users/${encodeURIComponent(sub)}/resumes/${randomUUID()}`;await client.send(new s3.PutObjectCommand({Bucket:bucket,Key:key,Body:bytes,ContentType:contentType,ServerSideEncryption:'AES256'}));return key;},
     async presign(key,contentType,size){return getSignedUrl(client,new s3.PutObjectCommand({Bucket:bucket,Key:key,ContentType:contentType,ContentLength:size}),{expiresIn:300,signableHeaders:new Set(['content-length','content-type'])});},
     async remove(key){await client.send(new s3.DeleteObjectCommand({Bucket:bucket,Key:key}));},
-    async get(key,max){const r=await client.send(new s3.GetObjectCommand({Bucket:bucket,Key:key}));if((r.ContentLength??max+1)>max){r.Body?.destroy();throw new HttpError(413,'RESUME_TOO_LARGE','Resume must not exceed 5 MB.');}let size=0,chunks=[];for await(const chunk of r.Body){size+=chunk.length;if(size>max){r.Body.destroy();throw new HttpError(413,'RESUME_TOO_LARGE','Resume must not exceed 5 MB.');}chunks.push(chunk);}return Buffer.concat(chunks);},
+    async get(key,max){const r=await client.send(new s3.GetObjectCommand({Bucket:bucket,Key:key}));if((r.ContentLength??max+1)>max){r.Body?.destroy();throw new HttpError(413,'RESUME_TOO_LARGE','Resume must not exceed 5 MB.');}let size=0;const chunks=[];for await(const chunk of r.Body){size+=chunk.length;if(size>max){r.Body.destroy();throw new HttpError(413,'RESUME_TOO_LARGE','Resume must not exceed 5 MB.');}chunks.push(chunk);}return Buffer.concat(chunks);},
     async removeUser(sub){
       for(const prefix of [`users/${encodeURIComponent(sub)}/`,`pending/${encodeURIComponent(sub)}/`]){
         let token;do{const r=await client.send(new s3.ListObjectsV2Command({Bucket:bucket,Prefix:prefix,ContinuationToken:token}));if(r.Contents?.length){const out=await client.send(new s3.DeleteObjectsCommand({Bucket:bucket,Delete:{Objects:r.Contents.map(x=>({Key:x.Key}))}}));if(out.Errors?.length)throw Error('Resume deletion incomplete');}token=r.NextContinuationToken;}while(token);
@@ -321,7 +321,7 @@ export async function createBilling(env,dependencies={}){
     matching.sort((a,b)=>(b.created??0)-(a.created??0));
     const sub=matching.find(candidate=>hasManagedSubscription({subscriptionId:candidate.id,subscriptionStatus:candidate.status}))??matching[0];
     const invoices=new Map(),invoice=await invoiceFor(s,sub,invoices),monthlyPayment=await verifiedMonthlyPayment(s,sub,invoice,userSub,customerId);
-    let refunded=monthlyPayment?.refunded===true,disputed=monthlyPayment?.disputed===true;
+    const refunded=monthlyPayment?.refunded===true,disputed=monthlyPayment?.disputed===true;
     let subscriptionEverPaid=row.value.subscriptionEverPaid===true||Boolean(monthlyPayment);
     // Starter is a try-before-subscription offer. A paid invoice on an older
     // RoleClue catalog price must still make the account permanently

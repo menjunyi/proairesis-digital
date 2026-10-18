@@ -64,7 +64,12 @@ export function plainText(value) {
   text = text.replace(/<!--[\s\S]*?(?:-->|$)/g, ' ')
     .replace(/<(script|style|iframe|object|template|svg)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, ' ')
     .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, '\n');
-  return text.replace(/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ')
+  text = Array.from(text, character => {
+    const codePoint = character.codePointAt(0);
+    return character === '<' || character === '>' || codePoint <= 0x08 || codePoint === 0x0b ||
+      codePoint === 0x0c || codePoint >= 0x0e && codePoint <= 0x1f ? ' ' : character;
+  }).join('');
+  return text
     .replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 

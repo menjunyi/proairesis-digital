@@ -88,7 +88,8 @@ function readAws(profile, service, operation, input = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      error ? reject(error) : resolveResult(value);
+      if (error) reject(error);
+      else resolveResult(value);
     };
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
