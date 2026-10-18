@@ -34,6 +34,13 @@ test('Freehire omits invalid or unavailable source dates instead of inventing th
   assert.equal('publishedAt' in job,false);assert.equal('sourceFirstSeenAt' in job,false);assert.equal('sourceUpdatedAt' in job,false);assert.equal('closingAt' in job,false);
 });
 
+test('Freehire accepts its documented boundary of one hundred direct ATS jobs',async()=>{
+  const rows=Array.from({length:100},(_,index)=>({...direct,public_slug:`software-engineer-${index}`,url:`https://boards.greenhouse.io/acme/jobs/${1000+index}`}));
+  const search=createFreehireSearch(env,{fetchImpl:async()=>response({data:rows,meta:{total:100,limit:100,offset:0}})});
+  const result=await search.search(profile);
+  assert.equal(result.jobs.length,100);assert.equal(result.source.returned,100);assert.equal(result.source.accepted,100);
+});
+
 test('Freehire refuses ignored safety filters and oversized result sets with honest errors',async()=>{
   const ignored=createFreehireSearch(env,{fetchImpl:async()=>response({data:[direct],meta:{total:1,limit:100,offset:0,ignored_params:['countries']}})});
   await assert.rejects(()=>ignored.search(profile),error=>error.code==='JOB_SEARCH_UNAVAILABLE'&&/filters/.test(error.message));

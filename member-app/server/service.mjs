@@ -18,6 +18,7 @@ const DISPATCH_REPAIR_MS=5*60*1000;
 const WORKER_LEASE_MS=2*60*1000;
 const RECOMMENDATION_STALE_MS=20*60*60*1000;
 const RECOMMENDATION_RETRY_MS=15*60*1000;
+const MAX_SEARCH_RESULTS=100;
 const RECOMMENDATION_REGISTRY_PK='RECOMMENDATION_REGISTRY';
 const RECOMMENDATION_STATE_SK='RECOMMENDATION_STATE';
 const RECOMMENDATION_JOB_PREFIX='RECOMMENDATION_JOB#';
@@ -511,7 +512,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(!state.session.profile?.confirmed)fail(409,'PROFILE_INCOMPLETE','Confirm the essential profile details before searching.');
     if(!guestSearch?.search)fail(503,'JOB_SEARCH_NOT_CONFIGURED','Live job search is awaiting source approval. No sample jobs were substituted.');
     let result;try{result=await guestSearch.search(state.session.profile,state.session);}catch(error){if(error?.status===503)fail(503,error.code??'JOB_SEARCH_UNAVAILABLE',error.message);throw error;}
-    if(!Array.isArray(result?.jobs)||result.jobs.length>60)fail(503,'JOB_SEARCH_UNAVAILABLE','The live job source returned an invalid result set. Try again shortly.');
+    if(!Array.isArray(result?.jobs)||result.jobs.length>MAX_SEARCH_RESULTS)fail(503,'JOB_SEARCH_UNAVAILABLE','The live job source returned an invalid result set. Try again shortly.');
     const ignored=new Set(state.session.ignoredJobIds??[]),ranked=[];
     for(const job of result.jobs){if(ignored.has(job.id))continue;const assessment=assessWithReasons(state.session.profile,job);if(assessment.highFit)ranked.push(assessment);}
     ranked.sort((a,b)=>b.score-a.score||a.job.id.localeCompare(b.job.id));const opportunities=ranked.slice(0,30),ids=opportunities.map(item=>item.job.id),searchedAt=iso();
@@ -671,7 +672,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
         const retained=await retainRecommendationCache(pk,profileRow,cache);if(retained)return retained;
         fail(503,error?.code??'JOB_SEARCH_UNAVAILABLE',error?.message??'Live job search is temporarily unavailable. Try again shortly.');
       }
-      if(!Array.isArray(result?.jobs)||result.jobs.length>100){cache=await readRecommendationCache(pk,profileRow.value);const retained=await retainRecommendationCache(pk,profileRow,cache);if(retained)return retained;fail(503,'JOB_SEARCH_UNAVAILABLE','The live job source returned an invalid result set. Try again shortly.');}
+      if(!Array.isArray(result?.jobs)||result.jobs.length>MAX_SEARCH_RESULTS){cache=await readRecommendationCache(pk,profileRow.value);const retained=await retainRecommendationCache(pk,profileRow,cache);if(retained)return retained;fail(503,'JOB_SEARCH_UNAVAILABLE','The live job source returned an invalid result set. Try again shortly.');}
       const ranked=[],seen=new Set();let excludedCount=0;
       for(const job of result.jobs){if(!job?.id||seen.has(job.id))continue;seen.add(job.id);const assessment=assessWithReasons(profileRow.value,job);if(assessment.highFit)ranked.push(assessment);else excludedCount++;}
       ranked.sort((a,b)=>b.score-a.score||a.job.id.localeCompare(b.job.id));const assessments=ranked.slice(0,30),ids=assessments.map(item=>item.job.id),refreshedAt=iso();

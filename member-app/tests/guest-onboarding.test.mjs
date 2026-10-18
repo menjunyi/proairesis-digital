@@ -108,6 +108,22 @@ test('guest flow stores only a token hash, returns five high-fit roles, preserve
   await assert.rejects(()=>service.claimGuest(other,{token:started.token,interestedJobId:interestedId},'203.0.113.25'),error=>error.code==='GUEST_ALREADY_CLAIMED');
 });
 
+test('guest search accepts one hundred provider jobs, stores thirty and returns five',async()=>{
+  const boundaryJobs=Array.from({length:100},(_,index)=>({...jobs[0],id:`boundary-${index}`,url:`https://boards.greenhouse.io/direct/jobs/boundary-${index}`}));
+  const {store,service}=await setup({guestSearch:{available:async()=>true,search:async()=>({jobs:boundaryJobs,source:{name:'Freehire',status:'ready'}})}});
+  const {started}=await confirmedGuest(service),searched=await service.searchGuest({token:started.token},'203.0.113.61');
+  const guestPk=`GUEST#${createHash('sha256').update(started.token).digest('hex')}`;
+  assert.equal(searched.opportunities.length,5);assert.equal(searched.guest.search.highFitCount,30);
+  assert.equal((await store.list(guestPk,'JOB#')).length,30);
+});
+
+test('guest search rejects more than one hundred provider jobs',async()=>{
+  const oversized=Array.from({length:101},(_,index)=>({...jobs[0],id:`oversized-${index}`,url:`https://boards.greenhouse.io/direct/jobs/oversized-${index}`}));
+  const {service}=await setup({guestSearch:{available:async()=>true,search:async()=>({jobs:oversized,source:{name:'Freehire',status:'ready'}})}});
+  const {started}=await confirmedGuest(service);
+  await assert.rejects(()=>service.searchGuest({token:started.token},'203.0.113.62'),error=>error.status===503&&error.code==='JOB_SEARCH_UNAVAILABLE');
+});
+
 test('guest claim stays below the transaction limit after fifty ignored and thirty current roles',async()=>{
   const {store,service}=await setup(),{started}=await confirmedGuest(service);
   const searched=await service.searchGuest({token:started.token},sourceIp);
