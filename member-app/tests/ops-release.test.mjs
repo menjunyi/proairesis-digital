@@ -103,6 +103,8 @@ test('deployment binds an origin-gate phase and enables stack termination protec
   assert.match(source, /Set ROLECLUE_API_ORIGIN_GATE_ENABLED explicitly/);
   assert.match(source, /updateReadyStackStatus\(stack\.StackStatus\)/);
   assert.match(source, /rollbackHasSkippedResources\(stack, resources\)/);
+  assert.match(source, /apiOrigin\?\.CustomHeaders\?\.Items/);
+  assert.doesNotMatch(source, /apiOrigin\?\.OriginCustomHeaders\?\.Items/);
   assert.match(source, /protectedStack\?\.StackId === stack\.StackId && updateReadyStackStatus\(protectedStack\.StackStatus\)/);
   assert.match(source, /\['AVAILABLE', 'EXECUTE_COMPLETE'\]\.includes\(planned\.ExecutionStatus\)/);
   assert.match(source, /if \(planned\.ExecutionStatus === 'AVAILABLE'\)/);

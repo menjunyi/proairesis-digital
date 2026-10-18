@@ -212,7 +212,9 @@ if (apiOriginGateEnabled === 'true' && currentOriginGate !== 'true') {
   run(['cloudfront', 'wait', 'distribution-deployed', '--id', distributionId], { timeout: 900_000 });
   const distribution = awsJson(['cloudfront', 'get-distribution', '--id', distributionId]).Distribution;
   const apiOrigin = distribution?.DistributionConfig?.Origins?.Items?.find(origin => origin.Id === 'api');
-  const originHeaders = apiOrigin?.OriginCustomHeaders?.Items ?? [];
+  // CloudFormation calls this property OriginCustomHeaders, while the
+  // CloudFront GetDistribution API returns it as CustomHeaders.
+  const originHeaders = apiOrigin?.CustomHeaders?.Items ?? [];
   requireValue(distribution?.Status === 'Deployed' && originHeaders.some(header =>
     header.HeaderName?.toLowerCase() === 'x-roleclue-origin' && typeof header.HeaderValue === 'string' && header.HeaderValue.length >= 32),
   'Run and complete the origin-gate-disabled phase so deployed CloudFront sends the origin credential before enforcement.');
