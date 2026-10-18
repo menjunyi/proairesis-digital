@@ -1,4 +1,5 @@
 import {createHash,randomUUID,timingSafeEqual} from 'node:crypto';
+import {isIP} from 'node:net';
 import {DynamoStore,RecordSizeError} from './store.mjs';
 import {createService,HttpError} from './service.mjs';
 import {ResumeError} from './resume.mjs';
@@ -11,6 +12,21 @@ const secretMatches=(expected,actual)=>{
   const left=createHash('sha256').update(expected).digest(),right=createHash('sha256').update(candidate).digest();
   return timingSafeEqual(left,right)&&candidate.length===expected.length;
 };
+const guestSourceIp=(event,incoming,originSecret)=>{
+  const gatewaySource=event.requestContext?.http?.sourceIp??event.requestContext?.identity?.sourceIp??'';
+  if(typeof originSecret!=='string'||!originSecret)return gatewaySource;
+  const viewerAddress=typeof incoming['cloudfront-viewer-address']==='string'?incoming['cloudfront-viewer-address'].trim():'';
+  const bracketed=viewerAddress.match(/^\[([^\]]+)]:(\d{1,5})$/),separator=viewerAddress.lastIndexOf(':');
+  const viewerSource=bracketed?.[1]??viewerAddress.slice(0,separator),portText=bracketed?.[2]??viewerAddress.slice(separator+1),port=Number(portText);
+  const valid=viewerAddress.length<=200&&/^\d{1,5}$/.test(portText)&&port>0&&port<=65535&&Boolean(isIP(viewerSource));
+  if(!valid)throw new HttpError(403,'INVALID_VIEWER_IDENTITY','This API request does not have a trusted viewer identity.');
+  return viewerSource;
+};
+export function workQueueUrl(payload,env){
+  if(['generate','generation-repair-fanout'].includes(payload?.kind))return env.GENERATION_QUEUE_URL;
+  if(['recommendation-refresh','recommendation-fanout'].includes(payload?.kind))return env.RECOMMENDATION_QUEUE_URL;
+  throw Error('Unsupported async work kind');
+}
 const decodePathId=value=>{
   let decoded;try{decoded=decodeURIComponent(value);}catch{throw new HttpError(400,'INVALID_PATH_ID','This resource identifier is invalid.');}
   if(!decoded||decoded.length>200||decoded.includes('/')||/[\u0000-\u001f\u007f]/.test(decoded))throw new HttpError(400,'INVALID_PATH_ID','This resource identifier is invalid.');
@@ -33,6 +49,9 @@ export async function processGenerationBatch(service,event){
       }else if(payload?.kind==='recommendation-fanout'){
         if(Object.keys(payload).sort().join(',')!=='after,kind'||typeof payload.after!=='string'||payload.after.length<1||payload.after.length>160||/[\u0000-\u001f\u007f]/.test(payload.after))throw Error('Invalid recommendation fanout message');
         await service.queueRecommendationRefreshes({after:payload.after});
+      }else if(payload?.kind==='generation-repair-fanout'){
+        if(Object.keys(payload).sort().join(',')!=='cursor,kind'||typeof payload.cursor!=='string'||payload.cursor.length<1||payload.cursor.length>2048||!/^[A-Za-z0-9_-]+$/.test(payload.cursor))throw Error('Invalid generation repair fanout message');
+        await processGenerationRepair(service,{cursor:payload.cursor});
       }else throw Error('Invalid work message');
     }catch(error){
       if(typeof record.messageId!=='string'||!record.messageId)throw error;
@@ -42,6 +61,13 @@ export async function processGenerationBatch(service,event){
     }
   }
   return {batchItemFailures:failures};
+}
+
+export async function processGenerationRepair(service,{cursor=null,log=console.error}={}){
+  const result=await service.repairPendingGenerations({cursor});
+  for(const failure of result.failures)log(JSON.stringify({event:'generation_dispatch_repair_failed',...failure}));
+  for(const pending of result.reconciliationRequired)log(JSON.stringify({event:'generation_reconciliation_required',source:'scheduled-repair',...pending}));
+  return result;
 }
 
 export async function processDailyRefresh(service,feed){
@@ -74,8 +100,8 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       if(Buffer.byteLength(raw)>7*1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','Request too large.');
       if(path==='/api/stripe/webhook'&&method==='POST'){if(Buffer.byteLength(raw)>1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','Request too large.');return reply(200,await service.webhook(raw,incoming['stripe-signature']));}
       let body={};if(raw){try{body=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{throw new HttpError(400,'INVALID_JSON','Send a valid JSON object.');}}
-      const sourceIp=event.requestContext?.http?.sourceIp??event.requestContext?.identity?.sourceIp??'';
       if(path.startsWith('/api/guest/')&&(event.rawQueryString||Object.keys(event.queryStringParameters??{}).length))throw new HttpError(400,'INVALID_QUERY','Guest tokens and content must be sent in the request body, not the URL.');
+      const sourceIp=path.startsWith('/api/guest/')?guestSourceIp(event,incoming,originSecret):'';
       if(path==='/api/guest/start'&&method==='POST')return reply(200,await service.startGuest(body,sourceIp));
       if(path==='/api/guest/resume'&&method==='POST')return reply(200,await service.guestResume(body,sourceIp));
       if(path==='/api/guest/profile'&&['PUT','POST'].includes(method))return reply(200,await service.saveGuestProfile(body,sourceIp));
@@ -83,8 +109,8 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       if(path==='/api/guest/session'&&method==='POST')return reply(200,await service.readGuest(body,sourceIp));
       if(path==='/api/guest/ignore'&&method==='POST')return reply(200,await service.ignoreGuest(body,sourceIp));
       let user;
-      if(mode==='demo'){if(incoming.authorization!=='Bearer demo')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in to continue.');user={sub:'demo-user',email:'demo@example.test'};}
-      else{const claims=event.requestContext?.authorizer?.jwt?.claims;if(!claims?.sub||!claims.email||!(claims.email_verified===true||claims.email_verified==='true')||claims.token_use!=='id')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in with a verified email to continue.');user={sub:claims.sub,email:claims.email};}
+      if(mode==='demo'){if(incoming.authorization!=='Bearer demo')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in to continue.');user={sub:'demo-user',email:'demo@example.test',name:'Alex Example',identityUsername:'demo-user'};}
+      else{const claims=event.requestContext?.authorizer?.jwt?.claims,identityUsername=claims?.['cognito:username'];if(!claims?.sub||!claims.email||!(claims.email_verified===true||claims.email_verified==='true')||claims.token_use!=='id'||identityUsername!==undefined&&(typeof identityUsername!=='string'||!identityUsername||identityUsername.length>128||/[\u0000-\u001f\u007f]/.test(identityUsername)))throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in with a verified email to continue.');user={sub:claims.sub,email:claims.email,name:typeof claims.name==='string'?claims.name:'',identityUsername:identityUsername??claims.sub};}
       if(!(path==='/api/account'&&method==='DELETE'))await service.assertActive(user);
       const cursor=()=>{
         const query=new URLSearchParams(event.rawQueryString??'');
@@ -130,11 +156,11 @@ async function productionRuntime(){
   if(runtime)return runtime;
   const env=process.env;
   if(env.ROLECLUE_LOCAL_DEMO==='1')throw Error('Demo mode is forbidden in the Lambda handler');
-  if(!env.TABLE_NAME||!env.RESUME_BUCKET||!env.GENERATION_QUEUE_URL)throw Error('Production storage and generation queue are required');
+  if(!env.TABLE_NAME||!env.RESUME_BUCKET||!env.GENERATION_QUEUE_URL||!env.RECOMMENDATION_QUEUE_URL)throw Error('Production storage and work queues are required');
   const store=await DynamoStore.create(env.TABLE_NAME),feed=createFeed(store,env),files=await createFiles(env.RESUME_BUCKET),billing=await createBilling(env),guestSearch=createFreehireSearch(env);
   const {SQSClient,SendMessageCommand}=await import('@aws-sdk/client-sqs');const sqs=new SQSClient({});
-  const identity={async remove(sub){const {CognitoIdentityProviderClient,AdminDeleteUserCommand}=await import('@aws-sdk/client-cognito-identity-provider');try{await new CognitoIdentityProviderClient({}).send(new AdminDeleteUserCommand({UserPoolId:env.COGNITO_USER_POOL_ID,Username:sub}));}catch(e){if(e.name!=='UserNotFoundException')throw e;}}};
-  const service=createService({store,feed,files,billing,identity,guestSearch,guestRateSecret:()=>secret(env.GUEST_RATE_HASH_SECRET_PARAM),requireAiConsent:true,provider:createProvider(store,env),dispatch:async payload=>{const fifo=env.GENERATION_QUEUE_URL.endsWith('.fifo'),deduplicationId=payload.kind==='generate'?payload.generationId:createHash('sha256').update(`${payload.kind}:${payload.userSub??payload.after}:${new Date().toISOString().slice(0,10)}`).digest('hex'),response=await sqs.send(new SendMessageCommand({QueueUrl:env.GENERATION_QUEUE_URL,MessageBody:JSON.stringify(payload),...(fifo?{MessageGroupId:payload.kind,MessageDeduplicationId:deduplicationId}:{})}));if(!response.MessageId)throw Error('Work message not accepted');}});
+  const identity={async remove(username){const {CognitoIdentityProviderClient,AdminDeleteUserCommand}=await import('@aws-sdk/client-cognito-identity-provider');try{await new CognitoIdentityProviderClient({}).send(new AdminDeleteUserCommand({UserPoolId:env.COGNITO_USER_POOL_ID,Username:username}));}catch(e){if(e.name!=='UserNotFoundException')throw e;}}};
+  const service=createService({store,feed,files,billing,identity,guestSearch,guestRateSecret:()=>secret(env.GUEST_RATE_HASH_SECRET_PARAM),requireAiConsent:true,provider:createProvider(store,env),dispatch:async payload=>{const queueUrl=workQueueUrl(payload,env),fifo=queueUrl.endsWith('.fifo'),deduplicationId=payload.kind==='generate'?payload.generationId:createHash('sha256').update(`${payload.kind}:${payload.userSub??payload.cursor??payload.after}:${new Date().toISOString().slice(0,10)}`).digest('hex'),response=await sqs.send(new SendMessageCommand({QueueUrl:queueUrl,MessageBody:JSON.stringify(payload),...(fifo?{MessageGroupId:payload.kind,MessageDeduplicationId:deduplicationId}:{})}));if(!response.MessageId)throw Error('Work message not accepted');}});
   runtime={service,feed,http:createHttpHandler(service,{origins:(env.ALLOWED_ORIGINS??env.SITE_URL??'').split(',').filter(Boolean),originSecret:env.API_ORIGIN_SECRET})};return runtime;
 }
 export async function handler(event){
@@ -144,6 +170,10 @@ export async function handler(event){
   if(event?.kind==='generate'){
     if(Object.keys(event).sort().join(',')!=='generationId,kind,userSub'||typeof event.userSub!=='string'||event.userSub.length<1||event.userSub.length>160||/[\u0000-\u001f\u007f]/.test(event.userSub)||typeof event.generationId!=='string'||!/^[a-f0-9]{64}$/.test(event.generationId))throw Error('Invalid generation event');
     await r.service.runGeneration(event.userSub,event.generationId);return {ok:true};
+  }
+  if(event?.kind==='generation-repair'){
+    if(Object.keys(event).join(',')!=='kind')throw Error('Invalid generation repair event');
+    return processGenerationRepair(r.service);
   }
   if(event?.kind==='feed-refresh')return processDailyRefresh(r.service,r.feed);
   return r.http(event);

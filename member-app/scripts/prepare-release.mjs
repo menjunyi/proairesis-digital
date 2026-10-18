@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { hashDirectory } from './release-safety.mjs';
 
 const releasePathspecs = [
   ':/.github/workflows/member-app-release.yml',
@@ -72,8 +73,10 @@ export async function prepareRelease() {
   const lambdaSha256 = (await readFile('build/lambda.sha256', 'utf8')).trim();
   const indexSha256 = createHash('sha256').update(await readFile('dist/index.html')).digest('hex');
   const templateSha256 = createHash('sha256').update(await readFile('build/app.template.json')).digest('hex');
-  const releaseId = createHash('sha256').update(JSON.stringify({sourceRevision,lambdaSha256,indexSha256,templateSha256,config})).digest('hex');
-  const manifest = { version: 2, releaseId, sourceRevision, createdAt: new Date().toISOString(), mode: config.mode, lambdaSha256, indexSha256, templateSha256 };
+  const siteContentSha256 = await hashDirectory(resolve('dist'), { exclude: ['release.json'] });
+  const releaseId = createHash('sha256').update(JSON.stringify({sourceRevision,lambdaSha256,siteContentSha256,templateSha256})).digest('hex');
+  const manifest = { version: 3, releaseId, sourceRevision, createdAt: new Date().toISOString(), mode: config.mode,
+    lambdaSha256, indexSha256, siteContentSha256, templateSha256 };
   await writeFile('dist/release.json', JSON.stringify(manifest));
   await rm('build/site.zip', {force: true});
   execFileSync('zip', ['-q', '-r', resolve('build/site.zip'), '.'], {cwd: resolve('dist')});

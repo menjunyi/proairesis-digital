@@ -72,14 +72,17 @@ test("paginated frontend collections are complete, bounded and tied to one sessi
           id: `draft-${String(index).padStart(3, "0")}`,
           text: "Synthetic QA draft. ".repeat(800),
         }));
-        await store.transact([
+        const seedChanges = [
           ...applications.map((value) =>
             change(pk, `APP#${value.id}`, null, value),
           ),
           ...letters.map((value) =>
             change(pk, `LETTER#${applications[0].id}#${value.id}`, null, value),
           ),
-        ]);
+        ];
+        for (let index = 0; index < seedChanges.length; index += 50) {
+          await store.transact(seedChanges.slice(index, index + 50));
+        }
         const service = createService({
           store,
           feed: {

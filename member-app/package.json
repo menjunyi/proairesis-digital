@@ -23,6 +23,7 @@
     "release:secrets": "node scripts/ensure-runtime-secrets.mjs",
     "release:ai-policy": "node scripts/roleclue-ai-policy.mjs",
     "release:prepare": "npm run build:lambda && npm run infra:template && node scripts/prepare-release.mjs",
+    "release:artifacts": "node scripts/deploy-artifact-versioning.mjs",
     "release:plan": "node scripts/deploy-production.mjs --plan",
     "release:deploy": "node scripts/deploy-production.mjs --execute-existing",
     "release:rollback": "node scripts/rollback-production.mjs",

@@ -37,7 +37,17 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high
-      - name: Build all production artifacts
+      - name: Build pull-request validation artifacts
+        if: github.event_name == 'pull_request'
+        env:
+          ROLECLUE_COGNITO_CLIENT_ID: syntheticci1234567890client
+          ROLECLUE_RECOMMENDATIONS_ENABLED: 'true'
+          ROLECLUE_GUEST_DISCOVERY_ENABLED: 'true'
+          ROLECLUE_COVER_LETTERS_ENABLED: 'true'
+          ROLECLUE_BILLING_ENABLED: 'true'
+        run: npm run build && npm run build:lambda && npm run infra:template
+      - name: Prepare releasable main-branch artifacts
+        if: github.event_name != 'pull_request'
         env:
           ROLECLUE_COGNITO_CLIENT_ID: syntheticci1234567890client
           ROLECLUE_RECOMMENDATIONS_ENABLED: 'true'

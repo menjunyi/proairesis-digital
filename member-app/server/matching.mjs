@@ -54,9 +54,12 @@ function evaluate(profile, job, now, explain) {
       text: `The role requires ${req.clearance} clearance.`, jobEvidence: proof('clearance', evidence(job.description, 'clearance')),
     });
   }
-  const locationMatches = pref.locations?.some(value => job.location.toLowerCase().includes(value.toLowerCase()));
+  const requiredLocations = Array.isArray(pref.locations)
+    ? pref.locations.filter(value => typeof value === 'string').map(value => value.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const locationMatches = requiredLocations.some(value => job.location.toLowerCase().includes(value));
   const includedRemote = pref.includeRemote === true && job.workplaceType === 'remote';
-  if (pref.locationsRequired && pref.locations?.length && !locationMatches && !includedRemote) {
+  if (pref.locationsRequired && requiredLocations.length && !locationMatches && !includedRemote) {
     return reject('The advertised location does not match your required locations.', {text: 'The location conflicts with a must-have preference.', jobEvidence: job.location});
   }
   if (pref.workplaceRequired && pref.workplaceTypes?.length && job.workplaceType !== 'unknown'

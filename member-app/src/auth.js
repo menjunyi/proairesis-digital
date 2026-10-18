@@ -1,3 +1,5 @@
+import { clearAccountBrowserState } from "./guest-state.js";
+
 const SESSION_KEY = "roleclue.session.v1";
 const OAUTH_KEY = "roleclue.oauth.v1";
 let sessionEpoch = 0;
@@ -302,9 +304,10 @@ export async function getToken(config) {
   return promise;
 }
 
-export async function signOut(config) {
+export async function signOut(config, { preserveGuestState = false } = {}) {
   const session = readSession();
   clearSession();
+  clearAccountBrowserState({ preserveGuestState });
   if (session?.accessToken && !session.demo) {
     try {
       await cognito(config, "GlobalSignOut", {

@@ -81,14 +81,65 @@ export function clearContinuation() {
   sessionStorage.removeItem(CONTINUATION_KEY);
 }
 
+function pendingApplicationId(accountContinuation) {
+  const value = accountContinuation?.pendingApplicationId;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+export function reconcileClaimedContinuation(
+  localContinuation,
+  accountContinuation,
+) {
+  const serverApplicationId = pendingApplicationId(accountContinuation);
+  if (localContinuation?.claimed) {
+    if (localContinuation.applicationId !== serverApplicationId) {
+      clearContinuation();
+      if (!serverApplicationId) return null;
+      return saveContinuation({
+        token: "",
+        jobId: serverApplicationId,
+        applicationId: serverApplicationId,
+        claimed: true,
+        awaitingAuth: false,
+      });
+    }
+    return saveContinuation({ awaitingAuth: false });
+  }
+  if (!localContinuation && serverApplicationId) {
+    return saveContinuation({
+      token: "",
+      jobId: serverApplicationId,
+      applicationId: serverApplicationId,
+      claimed: true,
+      awaitingAuth: false,
+    });
+  }
+  return localContinuation;
+}
+
+export function completedContinuationApplicationId(result) {
+  const value = result?.applicationId;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 export function rememberApplication(id) {
   if (typeof id !== "string" || !id) return;
   write(APPLICATION_KEY, { id });
 }
 
+export function clearRememberedApplication() {
+  sessionStorage.removeItem(APPLICATION_KEY);
+}
+
+export function clearAccountBrowserState({ preserveGuestState = false } = {}) {
+  if (!preserveGuestState) clearGuestState();
+  clearContinuation();
+  clearRememberedApplication();
+}
+
 export function takeRememberedApplication() {
   const value = read(APPLICATION_KEY);
-  sessionStorage.removeItem(APPLICATION_KEY);
+  clearRememberedApplication();
   return typeof value?.id === "string" ? value.id : null;
 }
 

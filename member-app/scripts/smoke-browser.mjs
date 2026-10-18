@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -12,12 +12,15 @@ import {
   DescribeUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { syntheticResumePdf } from "./smoke-cloud.mjs";
+import { verifyLiveRelease, writeSmokeEvidence } from "./smoke-evidence.mjs";
 
 // Deliberately excluded from npm test and deployment. Review the deployment,
 // then opt in: ROLECLUE_RUN_BROWSER_SMOKE=1 node scripts/smoke-browser.mjs
-// Uses only the existing agent-owned TaskSpace 82 / p1; never creates, claims,
-// closes or finishes a space. Allow roughly 10 minutes, including upload-link
-// expiry. SIGINT/SIGTERM requests stop new tests but preserve finally cleanup.
+// ROLECLUE_BROWSER_TASKSPACE_ID must identify an existing agent-owned space.
+// ROLECLUE_BROWSER_PAGE_LABEL may select its existing page and defaults to p1.
+// The smoke never creates, claims, closes or finishes a space. Allow roughly
+// 10 minutes, including upload-link expiry. SIGINT/SIGTERM requests stop new
+// tests but preserve finally cleanup.
 // SIGKILL, machine shutdown or a prolonged outage can still require cleanup.
 // No emails, provider calls, payments, real resumes or saved passwords are used.
 const ACCOUNT = "037169690315";
@@ -29,6 +32,24 @@ class SmokeCheckError extends Error {}
 
 function check(condition, label) {
   if (!condition) throw new SmokeCheckError(label);
+}
+
+export function browserTarget(env = {}) {
+  const taskSpaceText = String(env.ROLECLUE_BROWSER_TASKSPACE_ID ?? "").trim();
+  check(
+    /^[1-9]\d*$/.test(taskSpaceText) && Number.isSafeInteger(Number(taskSpaceText)),
+    "Set ROLECLUE_BROWSER_TASKSPACE_ID to an existing agent-owned browser TaskSpace ID",
+  );
+  const pageLabel = String(env.ROLECLUE_BROWSER_PAGE_LABEL ?? "p1").trim();
+  check(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(pageLabel),
+    "ROLECLUE_BROWSER_PAGE_LABEL must name an existing browser page using letters, numbers, dot, underscore or hyphen",
+  );
+  return { taskSpaceId: Number(taskSpaceText), pageLabel };
+}
+
+export function browserAwsProfile(env = {}) {
+  return env.AWS_PROFILE || (env.GITHUB_ACTIONS === "true" ? "" : "proairesis-management");
 }
 
 function report(checkName, result = "passed", screenshot) {
@@ -49,7 +70,6 @@ const sleep = (milliseconds) =>
 function createAws(profile) {
   const cognito = new CognitoIdentityProviderClient({
     region: REGION,
-    profile,
     maxAttempts: 2,
   });
   const cognitoCommands = {
@@ -62,6 +82,7 @@ function createAws(profile) {
   const readOnlyCli = new Set([
     "sts:get-caller-identity",
     "cloudformation:describe-stacks",
+    "lambda:get-alias",
     "lambda:get-function-configuration",
     "cloudfront:get-distribution",
     "dynamodb:describe-table",
@@ -77,8 +98,8 @@ function createAws(profile) {
       let timer;
       try {
         // Password-bearing inputs never reach argv, files or process output.
-        // Explicit client profile uses the installed SDK's profile credential
-        // chain rather than unrelated static environment credentials.
+        // AWS_PROFILE is set before the client is constructed, so the SDK and
+        // allowlisted CLI reads resolve the same explicit credential provider.
         return await Promise.race([
           cognito.send(new Command(input), {
             abortSignal: AbortSignal.timeout(45_000),
@@ -114,8 +135,7 @@ function createAws(profile) {
         [
           service,
           operation,
-          "--profile",
-          profile,
+          ...(profile ? ["--profile", profile] : []),
           "--region",
           REGION,
           "--no-cli-pager",
@@ -188,18 +208,21 @@ async function boundedJson(response) {
 // Serialized into ego-browser's stdin. Arguments live in child-process memory;
 // do not print them, page snapshots, receipts, requests or caught errors.
 async function browserRound(parameters) {
-  let stage = "existing browser space",
+  let stage = `Configured browser TaskSpace ${parameters.taskSpaceId}/${parameters.pageLabel} is unavailable. Check ROLECLUE_BROWSER_TASKSPACE_ID and ROLECLUE_BROWSER_PAGE_LABEL`,
     page,
     observerInstalled = false;
   let outcome = { passed: false, stage };
   try {
-    const task = await taskSpace(82);
-    if (Number(task.spaceId) !== 82 || task.ownership !== "agent")
+    const task = await taskSpace(parameters.taskSpaceId);
+    if (
+      Number(task.spaceId) !== parameters.taskSpaceId ||
+      task.ownership !== "agent"
+    )
       throw new Error("Unavailable");
     const pages = await task.pages();
-    if (!pages.some((item) => item.label === "p1"))
+    if (!pages.some((item) => item.label === parameters.pageLabel))
       throw new Error("Missing page");
-    page = task.page("p1");
+    page = task.page(parameters.pageLabel);
     stage = "deployed signed-out page";
     await page.goto(parameters.siteUrl, {
       timeout: 30_000,
@@ -514,12 +537,21 @@ export async function runBrowserSmoke(env = process.env) {
     !env.AWS_REGION || env.AWS_REGION === REGION,
     "Browser smoke region must be ap-southeast-2",
   );
+  const startedAt = new Date().toISOString();
+  const checks = [];
+  const record = (label, result = "passed", screenshot) => {
+    checks.push({ label, result, ...(screenshot ? { screenshot } : {}) });
+    report(label, result, screenshot);
+  };
+  const browserTargetConfig = browserTarget(env);
+  const profile = browserAwsProfile(env);
+  if (profile) process.env.AWS_PROFILE = profile;
   const stackName = env.ROLECLUE_STACK_NAME || "roleclue-member-app";
   check(
     /^roleclue-member-app(?:-[a-z0-9-]+)?$/.test(stackName),
     "Only the RoleClue member-app stack is in scope",
   );
-  const aws = createAws(env.AWS_PROFILE || "proairesis-management");
+  const aws = createAws(profile);
   const caller = await aws("sts", "get-caller-identity");
   check(
     caller.Account === ACCOUNT,
@@ -547,9 +579,13 @@ export async function runBrowserSmoke(env = process.env) {
     "CognitoUserPoolId",
     "CognitoClientId",
     "FunctionName",
+    "FunctionVersion",
+    "FunctionAliasArn",
     "TableName",
     "ResumeBucket",
     "DistributionId",
+    "GenerationQueueUrl",
+    "RecommendationQueueUrl",
   ]) {
     check(outputs[key], `Stack output ${key} is missing`);
   }
@@ -572,9 +608,13 @@ export async function runBrowserSmoke(env = process.env) {
       !api.hash,
     "Unexpected API origin",
   );
-  const config = await aws("lambda", "get-function-configuration", {
-    FunctionName: outputs.FunctionName,
+  const liveRelease = await verifyLiveRelease({
+    aws,
+    outputs,
+    siteUrl,
+    check,
   });
+  const config = liveRelease.configuration;
   check(
     config.FunctionArn?.startsWith(
       `arn:aws:lambda:${REGION}:${ACCOUNT}:function:`,
@@ -596,7 +636,8 @@ export async function runBrowserSmoke(env = process.env) {
       Number(variables.OPENAI_DAILY_TOKEN_LIMIT) > 0 &&
       variables.FREEHIRE_ENABLED === "true" &&
       variables.FREEHIRE_LICENSE_APPROVED === "true" &&
-      Boolean(variables.GENERATION_QUEUE_URL) &&
+      variables.GENERATION_QUEUE_URL === outputs.GenerationQueueUrl &&
+      variables.RECOMMENDATION_QUEUE_URL === outputs.RecommendationQueueUrl &&
       variables.ROLECLUE_LOCAL_DEMO !== "1",
     "Production billing, AI, job search and generation queue must be configured",
   );
@@ -671,7 +712,8 @@ export async function runBrowserSmoke(env = process.env) {
       publicConfig.betaNotice,
     "Deployed browser configuration does not match this stack",
   );
-  report(
+  record("deployed frontend manifest matches the protected live Lambda alias and code hash");
+  record(
     "company account, completed stack, production browser target and enabled production capabilities verified",
   );
 
@@ -706,7 +748,10 @@ export async function runBrowserSmoke(env = process.env) {
   let attemptedIdentity = false,
     browserAttempted = false,
     testError,
-    cleanupError;
+    cleanupError,
+    screenshotPath,
+    screenshotEvidencePath,
+    screenshotSha256;
   const identify = async () => {
     const user = await aws("cognito-idp", "admin-get-user", {
       UserPoolId: outputs.CognitoUserPoolId,
@@ -773,13 +818,10 @@ export async function runBrowserSmoke(env = process.env) {
   try {
     checkContinue();
     const preflight = await runBrowser(
-      { phase: "preflight", siteUrl },
+      { phase: "preflight", siteUrl, ...browserTargetConfig },
       control,
     );
-    check(
-      preflight.passed,
-      "Existing TaskSpace 82/p1 must be agent-owned and signed out; nothing was created",
-    );
+    check(preflight.passed, preflight.stage);
     const health = await request("GET", "/api/health");
     check(
       health.status === 200 &&
@@ -808,15 +850,18 @@ export async function runBrowserSmoke(env = process.env) {
     await authenticateForCleanup();
     checkContinue();
     const marker = `ROLECLUE SYNTHETIC BROWSER ${randomUUID().toUpperCase()}`;
+    const evidenceDirectory = resolve("build/evidence");
+    await mkdir(evidenceDirectory, { recursive: true });
     const screenshot = resolve(
-      tmpdir(),
-      `roleclue-browser-smoke-${randomUUID()}.png`,
+      evidenceDirectory,
+      `browser-smoke-${Date.now()}-${randomUUID()}.png`,
     );
     browserAttempted = true;
     const browser = await runBrowser(
       {
         phase: "upload",
         siteUrl,
+        ...browserTargetConfig,
         email: identity.email,
         password: identity.password,
         marker,
@@ -826,15 +871,20 @@ export async function runBrowserSmoke(env = process.env) {
       },
       control,
     );
-    if (!browser.passed) report(browser.stage, "FAILED");
+    if (!browser.passed) record(browser.stage, "FAILED");
     check(
       browser.passed && browser.screenshot === screenshot,
       "Browser sign-in/upload/extraction or scoped sign-out failed",
     );
-    report(
+    screenshotPath = screenshot;
+    screenshotEvidencePath = screenshot.slice(resolve(".").length + 1);
+    screenshotSha256 = createHash("sha256")
+      .update(await readFile(screenshot))
+      .digest("hex");
+    record(
       "normal UI sign-in, consent, actual S3 PUT/CORS and visible extracted text",
       "passed",
-      screenshot,
+      screenshotEvidencePath,
     );
     const saved = await request("GET", "/api/me", undefined, identity.token);
     check(
@@ -844,7 +894,7 @@ export async function runBrowserSmoke(env = process.env) {
         saved.body.profile.confirmed === false,
       "Browser-extracted resume was not durably saved to the synthetic profile",
     );
-    report("browser extraction persisted in the correct synthetic account");
+    record("browser extraction persisted in the correct synthetic account");
     checkContinue();
   } catch (error) {
     testError = error;
@@ -983,13 +1033,13 @@ export async function runBrowserSmoke(env = process.env) {
               "Synthetic resume objects remain after deletion",
             );
           }
-          report(
+          record(
             "synthetic account deleted; old token rejected; Cognito identity, user records and resume objects absent",
           );
-        } else report("failed creation left no synthetic Cognito identity");
+        } else record("failed creation left no synthetic Cognito identity");
       } catch (error) {
         cleanupError = error;
-        report(
+        record(
           "synthetic cleanup",
           "FAILED: operator follow-up required; deployment acceptance must not pass",
         );
@@ -1009,9 +1059,37 @@ export async function runBrowserSmoke(env = process.env) {
     !control.stopped,
     "Smoke interrupted; synthetic cleanup completed, acceptance was not marked passed",
   );
-  report(
+  record(
     "browser signed-upload acceptance complete; existing browser space left open; only synthetic screenshot and non-PII deletion hash retained",
   );
+  check(screenshotPath && screenshotEvidencePath && screenshotSha256, "Browser screenshot evidence is missing");
+  const evidencePath = await writeSmokeEvidence("browser-smoke", {
+    startedAt,
+    completedAt: new Date().toISOString(),
+    account: ACCOUNT,
+    region: REGION,
+    stackId: stack.StackId,
+    siteUrl,
+    sourceRevision: liveRelease.manifest.sourceRevision,
+    releaseId: liveRelease.manifest.releaseId,
+    releaseCreatedAt: liveRelease.manifest.createdAt,
+    lambdaSha256: liveRelease.manifest.lambdaSha256,
+    liveFunctionVersion: liveRelease.alias.FunctionVersion,
+    liveAliasArn: liveRelease.alias.AliasArn,
+    browserTarget: browserTargetConfig,
+    screenshot: {
+      path: screenshotEvidencePath,
+      sha256: screenshotSha256,
+    },
+    checks,
+  });
+  report("browser smoke evidence saved to build/evidence/browser-smoke.json");
+  return {
+    evidencePath,
+    screenshotPath,
+    releaseId: liveRelease.manifest.releaseId,
+    sourceRevision: liveRelease.manifest.sourceRevision,
+  };
 }
 
 if (

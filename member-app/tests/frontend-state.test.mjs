@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   capabilitiesFor,
   continuationRecovery,
+  generationFailureMessage,
   guestJourneyAvailable,
   memberRoute,
   mergeApplicationUpdate,
@@ -17,6 +18,32 @@ import {
   signIn,
   signOut,
 } from "../src/auth.js";
+import {
+  readContinuation,
+  readGuestState,
+  rememberApplication,
+  saveContinuation,
+  saveGuestState,
+} from "../src/guest-state.js";
+
+test("generation failures preserve the server's specific explanation", () => {
+  assert.equal(
+    generationFailureMessage({
+      error:
+        "Your paid allowance was revoked before this letter completed. No generation was consumed.",
+    }),
+    "Your paid allowance was revoked before this letter completed. No generation was consumed.",
+  );
+  assert.equal(
+    generationFailureMessage({ error: { message: "Provider unavailable." } }),
+    "Provider unavailable.",
+  );
+  assert.equal(
+    generationFailureMessage({ message: "Generation was declined." }),
+    "Generation was declined.",
+  );
+  assert.match(generationFailureMessage({}), /No generation credit was used/);
+});
 
 test("guest claim recovery retries only transient failures", () => {
   assert.equal(
@@ -239,6 +266,42 @@ test("resume upload preserves draft profile edits and server evidence provenance
   assert.equal(draft.resumeText, "old text");
 });
 
+test("resume upload applies safe evidence suggestions only to blank draft fields", () => {
+  const draft = {
+    name: "",
+    location: "",
+    yearsExperience: null,
+    roleFamilies: [],
+    workRights: "unknown",
+    needsSponsorship: "unknown",
+    preferences: { locations: [], roleTitles: [], limitations: "" },
+  };
+  const result = mergeResumeUpload(draft, {
+    extractedText: "resume evidence",
+    profile: {
+      name: "Alice Example",
+      location: "Sydney",
+      yearsExperience: 5,
+      roleFamilies: ["software"],
+      workRights: "unknown",
+      needsSponsorship: "unknown",
+      skills: ["TypeScript", "React"],
+      preferences: {
+        locations: ["Sydney"],
+        roleTitles: ["Software Engineer"],
+      },
+    },
+  });
+  assert.equal(result.name, "Alice Example");
+  assert.equal(result.location, "Sydney");
+  assert.equal(result.yearsExperience, 5);
+  assert.deepEqual(result.roleFamilies, ["software"]);
+  assert.deepEqual(result.preferences.locations, ["Sydney"]);
+  assert.deepEqual(result.preferences.roleTitles, ["Software Engineer"]);
+  assert.equal(result.workRights, "unknown");
+  assert.equal(result.needsSponsorship, "unknown");
+});
+
 test("an Interested continuation opens the exact application", () => {
   const applications = [{ id: "older" }, { id: "selected" }, { id: "newer" }];
   assert.equal(
@@ -382,6 +445,9 @@ test("auth refresh and immediate sign-out cannot restore a stale session", async
       async () => {
         seed();
         storage.setItem("roleclue.generation.synthetic-job", "{}");
+        saveGuestState({ token: "g".repeat(48), expiresAt: new Date(Date.now() + 60_000).toISOString(), step: "matches" });
+        saveContinuation({ token: "g".repeat(48), jobId: "job-1", applicationId: "job-1", claimed: true });
+        rememberApplication("job-1");
         const request = deferred();
         globalThis.fetch = async () => request.promise;
         const logout = signOut(config);
@@ -390,9 +456,27 @@ test("auth refresh and immediate sign-out cannot restore a stale session", async
           storage.getItem("roleclue.generation.synthetic-job"),
           null,
         );
+        assert.equal(readGuestState(), null);
+        assert.equal(readContinuation(), null);
+        assert.equal(storage.getItem("roleclue.application.v1"), null);
         request.reject(new Error("Synthetic sign-out interruption"));
         await logout;
         assert.equal(readSession(), null);
+      },
+    );
+    await t.test(
+      "returning from account auth can preserve only the guest journey",
+      async () => {
+        seed();
+        saveGuestState({ token: "g".repeat(48), expiresAt: new Date(Date.now() + 60_000).toISOString(), step: "matches" });
+        saveContinuation({ token: "g".repeat(48), jobId: "job-1", applicationId: "job-1", claimed: true });
+        rememberApplication("job-1");
+        globalThis.fetch = async () => response();
+        await signOut(config, { preserveGuestState: true });
+        assert.equal(readSession(), null);
+        assert.equal(readGuestState().token, "g".repeat(48));
+        assert.equal(readContinuation(), null);
+        assert.equal(storage.getItem("roleclue.application.v1"), null);
       },
     );
     await t.test(

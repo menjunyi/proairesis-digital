@@ -3,6 +3,7 @@ import {randomBytes, randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CognitoIdentityProviderClient, DescribeUserPoolCommand, AdminCreateUserCommand, AdminGetUserCommand, AdminSetUserPasswordCommand} from '@aws-sdk/client-cognito-identity-provider';
+import {verifyLiveRelease, writeSmokeEvidence} from './smoke-evidence.mjs';
 
 // Deliberately not part of npm test or deployment. It creates exactly two
 // synthetic, suppressed-email identities, then deletes both via the app API.
@@ -17,6 +18,18 @@ import {CognitoIdentityProviderClient, DescribeUserPoolCommand, AdminCreateUserC
 // invokes an AI provider. Signed-upload checks are not browser acceptance.
 const ACCOUNT = '037169690315';
 const REGION = 'ap-southeast-2';
+const ALARM_LOGICAL_IDS = [
+  'FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm',
+  'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm',
+  'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm',
+  'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm',
+  'AiAuthorityReviewAlarm',
+];
+const METRIC_FILTERS = [
+  ['"generation_reconciliation_required"', 'GenerationReconciliationRequired'],
+  ['"generation_dispatch_repair_failed"', 'GenerationDispatchRepairFailed'],
+  ['"ai_authority_review_required"', 'AiAuthorityReviewRequired'],
+];
 class SmokeCheckError extends Error {}
 
 function requireCheck(condition, label) {
@@ -39,8 +52,10 @@ function createAws(profile) {
     'admin-set-user-password': AdminSetUserPasswordCommand,
   };
   const cliReads = new Set([
-    'sts:get-caller-identity', 'cloudformation:describe-stacks',
-    'lambda:get-function-configuration', 'dynamodb:query',
+    'sts:get-caller-identity', 'cloudformation:describe-stacks', 'cloudformation:describe-stack-resources',
+    'lambda:get-alias', 'lambda:get-function-configuration', 'lambda:list-event-source-mappings',
+    'scheduler:get-schedule', 'cloudwatch:describe-alarms', 'logs:describe-metric-filters',
+    'sqs:get-queue-attributes', 'dynamodb:query',
     'dynamodb:get-item', 's3api:list-objects-v2', 'sns:list-subscriptions-by-topic',
   ]);
   return async (service, operation, input = {}) => {
@@ -135,6 +150,12 @@ async function jsonResponse(response) {
 export async function runCloudSmoke(env = process.env) {
   requireCheck(env.ROLECLUE_RUN_CLOUD_SMOKE === '1', 'Refusing cloud writes: set ROLECLUE_RUN_CLOUD_SMOKE=1 explicitly');
   requireCheck(!env.AWS_REGION || env.AWS_REGION === REGION, `Smoke region must be ${REGION}`);
+  const startedAt = new Date().toISOString();
+  const checks = [];
+  const record = (label, result = 'passed') => {
+    checks.push({label, result});
+    report(label, result);
+  };
   const profile = env.AWS_PROFILE || (env.GITHUB_ACTIONS === 'true' ? '' : 'proairesis-management');
   if (profile) process.env.AWS_PROFILE = profile;
   const stackName = env.ROLECLUE_STACK_NAME || 'roleclue-member-app';
@@ -147,7 +168,7 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(stack?.StackId?.startsWith(`arn:aws:cloudformation:${REGION}:${ACCOUNT}:stack/${stackName}/`), 'Stack account or region mismatch');
   requireCheck(['CREATE_COMPLETE', 'UPDATE_COMPLETE'].includes(stack.StackStatus), 'Stack is not in a completed state');
   const outputs = Object.fromEntries((stack.Outputs ?? []).map(item => [item.OutputKey, item.OutputValue]));
-  for (const key of ['SiteUrl', 'ApiUrl', 'DistributionDomain', 'CognitoUserPoolId', 'CognitoClientId', 'FunctionName', 'TableName', 'ResumeBucket', 'AlarmTopicArn']) requireCheck(outputs[key], `Stack output ${key} is missing`);
+  for (const key of ['SiteUrl', 'ApiUrl', 'DistributionDomain', 'CognitoUserPoolId', 'CognitoClientId', 'FunctionName', 'FunctionVersion', 'FunctionAliasArn', 'TableName', 'ResumeBucket', 'GenerationQueueUrl', 'RecommendationQueueUrl', 'FailedWorkQueueUrl', 'GenerationQueueArn', 'RecommendationQueueArn', 'FailedWorkQueueArn', 'DailyRefreshScheduleName', 'GenerationRepairScheduleName', 'LogGroupName', 'AlarmTopicArn']) requireCheck(outputs[key], `Stack output ${key} is missing`);
   const testSignedUpload = env.ROLECLUE_TEST_SIGNED_UPLOAD === '1';
   const uploadOrigin = 'https://app.proairesis.digital';
   requireCheck(outputs.SiteUrl === uploadOrigin, 'Smoke checks require the approved app origin');
@@ -159,14 +180,16 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(typeof outputs.DistributionDomain === 'string' && /^[a-z0-9]+\.cloudfront\.net$/.test(outputs.DistributionDomain),
     'CloudFront distribution output is missing or invalid');
   const requestBase = new URL(outputs.SiteUrl);
-  const functionConfig = await aws('lambda', 'get-function-configuration', {FunctionName: outputs.FunctionName});
+  const liveRelease = await verifyLiveRelease({aws, outputs, siteUrl: outputs.SiteUrl, check: requireCheck});
+  const functionConfig = liveRelease.configuration;
   requireCheck(functionConfig.FunctionArn?.startsWith(`arn:aws:lambda:${REGION}:${ACCOUNT}:function:`), 'Lambda account mismatch');
   const variables = functionConfig.Environment?.Variables ?? {};
   requireCheck(variables.TABLE_NAME === outputs.TableName && variables.RESUME_BUCKET === outputs.ResumeBucket && variables.COGNITO_USER_POOL_ID === outputs.CognitoUserPoolId, 'Lambda storage or identity outputs mismatch');
   requireCheck(Boolean(variables.STRIPE_PRICE_ID) && Boolean(variables.STRIPE_STARTER_PRICE_ID) &&
     Number(variables.OPENAI_DAILY_CALL_LIMIT) > 0 && Number(variables.OPENAI_DAILY_TOKEN_LIMIT) > 0 &&
     variables.FREEHIRE_ENABLED === 'true' && variables.FREEHIRE_LICENSE_APPROVED === 'true' &&
-    Boolean(variables.GENERATION_QUEUE_URL) && variables.ROLECLUE_LOCAL_DEMO !== '1',
+    variables.GENERATION_QUEUE_URL === outputs.GenerationQueueUrl &&
+    variables.RECOMMENDATION_QUEUE_URL === outputs.RecommendationQueueUrl && variables.ROLECLUE_LOCAL_DEMO !== '1',
   'Billing, AI, job search and durable generation must be configured for production');
   const pool = (await aws('cognito-idp', 'describe-user-pool', {UserPoolId: outputs.CognitoUserPoolId})).UserPool;
   requireCheck(pool?.Arn === `arn:aws:cognito-idp:${REGION}:${ACCOUNT}:userpool/${outputs.CognitoUserPoolId}`, 'Cognito account mismatch');
@@ -175,7 +198,51 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(alertSubscriptions.some(item=>item.Protocol==='email'&&item.Endpoint==='support@proairesis.digital'&&
     typeof item.SubscriptionArn==='string'&&item.SubscriptionArn.startsWith(`arn:aws:sns:${REGION}:${ACCOUNT}:`)),
   'The production alert email subscription is not confirmed');
-  report('target account, stack, storage, Cognito and production providers verified');
+  record('deployed frontend manifest matches the protected live Lambda alias and code hash');
+
+  const mappings=(await aws('lambda','list-event-source-mappings',{FunctionName:outputs.FunctionAliasArn})).EventSourceMappings??[];
+  for (const queueArn of [outputs.GenerationQueueArn,outputs.RecommendationQueueArn]) {
+    const matching=mappings.filter(item=>item.EventSourceArn===queueArn&&item.FunctionArn===outputs.FunctionAliasArn);
+    requireCheck(matching.length===1&&matching[0].State==='Enabled',`The live Lambda event-source mapping for ${queueArn.split(':').at(-1)} is not enabled`);
+  }
+  const schedules = [
+    [outputs.DailyRefreshScheduleName, 'feed-refresh'],
+    [outputs.GenerationRepairScheduleName, 'generation-repair'],
+  ];
+  for (const [name,kind] of schedules) {
+    const schedule=await aws('scheduler','get-schedule',{Name:name});
+    let input;
+    try {input=JSON.parse(schedule.Target?.Input??'');} catch {input=null;}
+    requireCheck(schedule.State==='ENABLED'&&schedule.Target?.Arn===outputs.FunctionAliasArn&&input?.kind===kind,
+      `The ${kind} schedule is not enabled on the live alias`);
+  }
+  const stackResources=(await aws('cloudformation','describe-stack-resources',{StackName:stackName})).StackResources??[];
+  const physicalByLogical=new Map(stackResources.map(item=>[item.LogicalResourceId,item.PhysicalResourceId]));
+  const alarmNames=ALARM_LOGICAL_IDS.map(id=>physicalByLogical.get(id));
+  requireCheck(alarmNames.every(Boolean),'One or more production alarm resources are missing');
+  const alarms=(await aws('cloudwatch','describe-alarms',{AlarmNames:alarmNames})).MetricAlarms??[];
+  requireCheck(alarms.length===alarmNames.length,'One or more production alarms could not be read');
+  for (const name of alarmNames) {
+    const alarm=alarms.find(item=>item.AlarmName===name);
+    requireCheck(alarm?.ActionsEnabled===true&&alarm.AlarmActions?.includes(outputs.AlarmTopicArn),
+      `Alarm ${name} does not notify the production alert topic`);
+  }
+  const filters=(await aws('logs','describe-metric-filters',{logGroupName:outputs.LogGroupName,limit:50})).metricFilters??[];
+  for (const [pattern,metricName] of METRIC_FILTERS) {
+    requireCheck(filters.some(filter=>filter.filterPattern===pattern&&filter.metricTransformations?.some(transform=>
+      transform.metricNamespace==='RoleClue'&&transform.metricName===metricName&&transform.metricValue==='1')),
+    `Metric filter ${metricName} is missing or invalid`);
+  }
+  record('event mappings, daily refresh, generation repair, alarms, log metrics and confirmed alert email verified');
+  record('target account, stack, storage, Cognito and production providers verified');
+
+  const requireEmptyQueues = async () => {
+    const attributes=['ApproximateNumberOfMessages','ApproximateNumberOfMessagesNotVisible','ApproximateNumberOfMessagesDelayed'];
+    for (const [label,queueUrl] of [['generation queue',outputs.GenerationQueueUrl],['recommendation queue',outputs.RecommendationQueueUrl],['shared dead-letter queue',outputs.FailedWorkQueueUrl]]) {
+      const state=await aws('sqs','get-queue-attributes',{QueueUrl:queueUrl,AttributeNames:attributes});
+      requireCheck(attributes.every(name=>Number(state.Attributes?.[name])===0),`${label} is not empty at release acceptance`);
+    }
+  };
 
   const request = async (method, path, body, token, extraHeaders = {}) => {
     const response = await fetch(new URL(path, requestBase), {method, redirect: 'error', signal: AbortSignal.timeout(35000),
@@ -234,7 +301,7 @@ export async function runCloudSmoke(env = process.env) {
   };
   const identities = [];
   const cleanupFailures = [];
-  let testError;
+  let testError, recommendationEvidence;
   try {
     const health = expect(await request('GET', '/api/health'), 200, 'health');
     requireCheck(health.ok === true && health.mode === 'production', 'Health did not identify production mode');
@@ -242,7 +309,7 @@ export async function runCloudSmoke(env = process.env) {
     requireCheck(direct.status === 403 && (await jsonResponse(direct)).error?.code === 'INVALID_ORIGIN',
       'Direct API Gateway access was not rejected');
     expect(await request('GET', '/api/me'), 401, 'unauthenticated profile');
-    report('public health, CloudFront origin gate and unauthenticated API boundary');
+    record('public health, CloudFront origin gate and unauthenticated API boundary');
     for (const ordinal of [1, 2]) {
       const identity = {ordinal, email: `roleclue-smoke-${randomUUID()}@invalid.example`, password: `Rc9${randomBytes(27).toString('base64url')}`};
       // Record the exact attempted identity BEFORE creation so a transport
@@ -256,7 +323,7 @@ export async function runCloudSmoke(env = process.env) {
       await signIn(identity);
     }
     const [first, second] = identities;
-    report('two isolated synthetic accounts signed in without sending email');
+    record('two isolated synthetic accounts signed in without sending email');
     const marker = `ROLECLUE SYNTHETIC ${randomUUID().toUpperCase()}`;
     const uploaded = expect(await request('POST', '/api/resume', {filename: 'synthetic-acceptance.pdf', contentType: 'application/pdf', consent: true,
       dataBase64: syntheticResumePdf(marker).toString('base64')}, first.token), 200, 'inline PDF upload');
@@ -271,8 +338,8 @@ export async function runCloudSmoke(env = process.env) {
     expect(await request('PUT', '/api/profile', {name: 'RoleClue Synthetic Two', confirmed: false}, second.token), 200, 'other user profile write');
     const firstAgain = expect(await request('GET', '/api/me', undefined, first.token), 200, 'first user isolation recheck');
     requireCheck(firstAgain.profile?.name === 'RoleClue Synthetic One' && firstAgain.profile.resumeText.includes(marker), 'Other user changed first user profile');
-    report('PDF upload, durable consent, profile confirmation and two-user isolation');
-    report('CloudFront forwarded authenticated API requests and preserved two-user isolation');
+    record('PDF upload, durable consent, profile confirmation and two-user isolation');
+    record('CloudFront forwarded authenticated API requests and preserved two-user isolation');
     // The implemented handler/contract route is /api/export, not /api/account/export.
     const firstExport = expect(await request('GET', '/api/export', undefined, first.token), 200, 'first user account export');
     const secondExport = expect(await request('GET', '/api/export', undefined, second.token), 200, 'second user account export');
@@ -284,18 +351,23 @@ export async function runCloudSmoke(env = process.env) {
       'Second account export did not include its own isolated profile');
     requireCheck(!JSON.stringify(firstExport).includes(second.email) && !JSON.stringify(secondExport).includes(first.email) &&
       !JSON.stringify(secondExport).includes(marker), 'Account export exposed another test user data');
-    report('account exports contain only their own synthetic profile and resume');
+    record('account exports contain only their own synthetic profile and resume');
     requireCheck(firstAgain.capabilities?.recommendations === true && firstAgain.capabilities?.coverLetters === true &&
       firstAgain.capabilities?.billing === true, 'Production account capabilities are not enabled');
     const jobs = expect(await request('POST', '/api/opportunities/refresh', {}, first.token), 200, 'approved-source recommendation refresh');
-    requireCheck(Array.isArray(jobs.opportunities) && jobs.opportunities.length <= 30 &&
-      ['ready', 'degraded'].includes(jobs.feed?.status) && typeof jobs.feed.message === 'string' && jobs.feed.message.length > 0,
-    'Recommendation refresh did not return a bounded, source-labelled result');
-    requireCheck(jobs.opportunities.every(item => item.score >= 75 && item.job?.australia === true),
+    requireCheck(Array.isArray(jobs.opportunities) && jobs.opportunities.length >= 1 && jobs.opportunities.length <= 30 &&
+      jobs.feed?.status === 'ready' && jobs.feed.source?.status === 'ready' &&
+      typeof jobs.feed.source?.name === 'string' && jobs.feed.source.name.length > 0 &&
+      typeof jobs.feed.message === 'string' && jobs.feed.message.length > 0,
+    'Recommendation refresh did not return a non-empty result from a ready source');
+    requireCheck(jobs.opportunities.every(item => item.highFit === true && item.score >= 75 && item.job?.australia === true) &&
+      jobs.opportunities.some(item => typeof item.job?.source === 'string' && item.job.source.startsWith('freehire:')),
       'Recommendation refresh returned a low-fit or non-Australian role');
+    recommendationEvidence={source:jobs.feed.source.name,status:jobs.feed.status,count:jobs.opportunities.length,
+      refreshedAt:jobs.feed.lastUpdatedAt??null};
     const webhook = expect(await request('POST', '/api/stripe/webhook', '{}', undefined, {'stripe-signature': 'invalid-synthetic-signature'}), 400, 'signed webhook boundary');
     requireCheck(webhook.error?.code === 'INVALID_SIGNATURE', 'Webhook signature rejection returned the wrong error');
-    report('approved-source recommendations and signed billing boundary; no checkout or paid AI request created');
+    record('non-empty high-fit Australian recommendations from a ready source and signed billing boundary verified; no checkout or paid AI request created');
     if (testSignedUpload) {
       const signedMarker = `ROLECLUE SIGNED UPLOAD ${randomUUID().toUpperCase()}`;
       const signedPdf = syntheticResumePdf(signedMarker);
@@ -342,7 +414,7 @@ export async function runCloudSmoke(env = process.env) {
       const blocked = expect(await request('DELETE', '/api/account', {confirmation: 'DELETE'}, first.token),
         409, 'live upload grant deletion fence');
       requireCheck(blocked.error?.code === 'UPLOAD_GRANT_ACTIVE', 'Account deletion was not blocked by the live upload grant');
-      report('signed PDF upload, S3 CORS, finalization and deletion fence verified via HTTP; browser acceptance not tested');
+      record('signed PDF upload, S3 CORS, finalization and deletion fence verified via HTTP; browser acceptance not tested');
     }
   } catch (error) {
     testError = error;
@@ -378,13 +450,13 @@ export async function runCloudSmoke(env = process.env) {
           const objects = await aws('s3api', 'list-objects-v2', {Bucket: outputs.ResumeBucket, Prefix: prefix, MaxKeys: 1});
           requireCheck((objects.KeyCount ?? 0) === 0 && !objects.Contents?.length, 'Synthetic resume bytes remain after deletion');
         }
-        report(`synthetic account ${identity.ordinal} deleted, old token rejected, identity/data/objects absent`);
+        record(`synthetic account ${identity.ordinal} deleted, old token rejected, identity/data/objects absent`);
       } catch (error) {
         // Identifiers here are random synthetic test data, never tokens or raw
         // resumes. Retain actionable exact targets if an outage blocks cleanup;
         // do not bypass the API or claim cleanup succeeded.
         cleanupFailures.push({ordinal: identity.ordinal, email: identity.email, sub: identity.sub ?? null});
-        report(`synthetic account ${identity.ordinal} cleanup`, 'FAILED: app/API or read-only verification requires operator follow-up');
+        record(`synthetic account ${identity.ordinal} cleanup`, 'FAILED: app/API or read-only verification requires operator follow-up');
       }
       identity.password = undefined;
       identity.token = undefined;
@@ -395,7 +467,19 @@ export async function runCloudSmoke(env = process.env) {
     throw new SmokeCheckError('Synthetic cleanup is incomplete; do not mark deployment acceptance passed');
   }
   if (testError) throw testError;
-  report('cloud acceptance complete; all synthetic user data removed, only non-PII deletion hashes retained');
+  await requireEmptyQueues();
+  record('generation, recommendation and shared dead-letter queues are empty');
+  record('cloud acceptance complete; all synthetic user data removed, only non-PII deletion hashes retained');
+  const evidencePath=await writeSmokeEvidence('cloud-smoke',{
+    startedAt,completedAt:new Date().toISOString(),account:ACCOUNT,region:REGION,
+    stackId:stack.StackId,siteUrl:outputs.SiteUrl,sourceRevision:liveRelease.manifest.sourceRevision,
+    releaseId:liveRelease.manifest.releaseId,releaseCreatedAt:liveRelease.manifest.createdAt,
+    lambdaSha256:liveRelease.manifest.lambdaSha256,
+    liveFunctionVersion:liveRelease.alias.FunctionVersion,liveAliasArn:liveRelease.alias.AliasArn,
+    recommendations:recommendationEvidence,checks,
+  });
+  report('cloud smoke evidence saved to build/evidence/cloud-smoke.json', 'passed');
+  return {evidencePath,releaseId:liveRelease.manifest.releaseId,sourceRevision:liveRelease.manifest.sourceRevision};
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

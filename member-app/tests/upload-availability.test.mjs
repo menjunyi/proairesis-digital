@@ -11,7 +11,7 @@ const bytes = Buffer.from('%PDF-valid-synthetic-input');
 const body = {filename: 'resume.pdf', contentType: 'application/pdf', consent: true, size: bytes.length};
 const extracted = {text: 'Built TypeScript and React applications and deployed AWS infrastructure. Collaborated with software delivery teams.', skills: ['TypeScript', 'React', 'AWS'], warnings: []};
 
-function uploadFixture() {
+function uploadFixture(resumeExtraction = extracted) {
   const store = new MemoryStore(), objects = new Map(), calls = [];
   let reject = false;
   const files = {
@@ -21,7 +21,7 @@ function uploadFixture() {
     async remove(key) {calls.push(['remove', key]); objects.delete(key);},
     async removeUser(sub) {for(const key of objects.keys())if(key.startsWith(`users/${sub}/`)||key.startsWith(`pending/${sub}/`))objects.delete(key);},
   };
-  const service = createService({store, files, feed: {async status() {return {status: 'not-configured'};}}, async extract() {calls.push(['extract']);if(reject)throw new ResumeError('Malformed resume.');return extracted;}});
+  const service = createService({store, files, feed: {async status() {return {status: 'not-configured'};}}, async extract() {calls.push(['extract']);if(reject)throw new ResumeError('Malformed resume.');return resumeExtraction;}});
   return {store, objects, calls, service, reject: value => reject = value};
 }
 
@@ -37,6 +37,20 @@ test('inline files are validated before storage and successful replacement remov
   assert.equal(f.objects.has(second.profile.resumeObjectKey), true);
   assert.equal(f.objects.size, 1);
   assert.ok(Date.parse(second.profile.resumeOriginalExpiresAt) > Date.now());
+});
+
+test('signed-in resume evidence fills blank profile fields without replacing reviewed facts', async () => {
+  const evidence={text:'Alice Example\nSydney NSW\nSoftware Engineer\nMore than 5 years of professional experience building TypeScript and React applications.',skills:['TypeScript','React'],warnings:[]};
+  const f=uploadFixture(evidence),first=await f.service.uploadResume(user,{...body,dataBase64:bytes.toString('base64')});
+  assert.equal(first.profile.name,'Alice Example');assert.equal(first.profile.location,'Sydney');assert.equal(first.profile.yearsExperience,5);
+  assert.deepEqual(first.profile.roleFamilies,['software']);assert.deepEqual(first.profile.preferences.locations,['Sydney']);
+  assert.ok(first.profile.preferences.roleTitles.includes('Software Engineer'));
+  assert.equal(first.profile.workRights,'unknown');assert.equal(first.profile.needsSponsorship,'unknown');
+  await f.service.saveProfile(user,{name:'Reviewed Name',location:'Melbourne',yearsExperience:9,roleFamilies:['data'],preferences:{locations:['Melbourne'],roleTitles:['Data Engineer']}});
+  const second=await f.service.uploadResume(user,{...body,dataBase64:bytes.toString('base64')});
+  assert.equal(second.profile.name,'Reviewed Name');assert.equal(second.profile.location,'Melbourne');assert.equal(second.profile.yearsExperience,9);
+  assert.deepEqual(second.profile.roleFamilies,['data']);assert.deepEqual(second.profile.preferences.locations,['Melbourne']);assert.deepEqual(second.profile.preferences.roleTitles,['Data Engineer']);
+  assert.equal(second.profile.workRights,'unknown');assert.equal(second.profile.needsSponsorship,'unknown');
 });
 
 test('five daily upload starts are atomic and pending records have top-level TTL', async () => {

@@ -91,8 +91,35 @@ export function mergeApplicationUpdate(previous, next) {
 
 export function mergeResumeUpload(draft, result, skillsEdited = false) {
   const uploaded = result.profile || {};
+  const draftPreferences = draft.preferences || {};
+  const uploadedPreferences = uploaded.preferences || {};
+  const preferText = (current, suggested) =>
+    typeof current === "string" && current.trim() ? current : suggested || current;
+  const preferList = (current, suggested) =>
+    Array.isArray(current) && current.length ? current : suggested || current;
+  const preferences = {
+    ...uploadedPreferences,
+    ...draftPreferences,
+  };
+  const locations = preferList(
+    draftPreferences.locations,
+    uploadedPreferences.locations,
+  );
+  const roleTitles = preferList(
+    draftPreferences.roleTitles,
+    uploadedPreferences.roleTitles,
+  );
+  if (locations !== undefined) preferences.locations = locations;
+  if (roleTitles !== undefined) preferences.roleTitles = roleTitles;
   const next = {
     ...draft,
+    name: preferText(draft.name, uploaded.name),
+    location: preferText(draft.location, uploaded.location),
+    yearsExperience: Number.isFinite(draft.yearsExperience)
+      ? draft.yearsExperience
+      : uploaded.yearsExperience ?? draft.yearsExperience,
+    roleFamilies: preferList(draft.roleFamilies, uploaded.roleFamilies),
+    preferences,
     resumeText: result.extractedText || uploaded.resumeText || draft.resumeText,
     skills: skillsEdited ? draft.skills : uploaded.skills || draft.skills,
     confirmed: false,
@@ -121,4 +148,14 @@ export function selectedApplicationId(applications, currentId, preferredId) {
   )
     return currentId;
   return applications[0]?.id || null;
+}
+
+export function generationFailureMessage(generation) {
+  const failure = generation?.error;
+  if (typeof failure === "string" && failure.trim()) return failure.trim();
+  if (typeof failure?.message === "string" && failure.message.trim())
+    return failure.message.trim();
+  if (typeof generation?.message === "string" && generation.message.trim())
+    return generation.message.trim();
+  return "The letter could not be generated. No generation credit was used. Please try again.";
 }

@@ -188,6 +188,10 @@ export async function createBilling(env,dependencies={}){
     throw unavailable('Billing history needs support review.');
   }
   const blankStarter=()=>({key:null,purchaseId:null,sessionId:null,status:'none',everPaid:false,used:0,reserved:0});
+  const emptyArray=value=>Array.isArray(value)&&value.length===0;
+  const emptyNullableList=value=>value===null||emptyArray(value);
+  const invoiceSubscriptionId=invoice=>objectId(invoice?.parent?.subscription_details?.subscription??invoice?.subscription);
+  const invoiceLinePriceId=line=>objectId(line?.pricing?.price_details?.price??line?.price);
   async function chargeForIntent(s,intent){
     const paymentIntent=typeof intent==='string'?await s.paymentIntents.retrieve(intent,{expand:['latest_charge']}):intent;
     let charge=paymentIntent?.latest_charge;if(typeof charge==='string')charge=await s.charges.retrieve(charge);
@@ -196,6 +200,23 @@ export async function createBilling(env,dependencies={}){
   function validStarterLineItems(session){
     const items=session.line_items?.data;
     return Array.isArray(items)&&items.length===1&&objectId(items[0].price)===env.STRIPE_STARTER_PRICE_ID&&items[0].quantity===1;
+  }
+  function validCheckoutOffer(session,plan,userSub,customerId){
+    const priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;
+    const offer=plan==='starter'?'starter-aud1-2-lifetime-v1':'monthly-aud20-50-v2',items=session.line_items?.data;
+    return session.mode===(plan==='starter'?'payment':'subscription')&&objectId(session.customer)===customerId
+      &&session.client_reference_id===userSub&&session.automatic_tax?.enabled===false
+      &&session.metadata?.roleclue_user_id===userSub&&session.metadata?.roleclue_plan===plan
+      &&session.metadata?.roleclue_price_id===priceId&&session.metadata?.roleclue_offer===offer
+      &&session.metadata?.terms_version===TERMS_VERSION&&Array.isArray(items)&&items.length===1
+      &&objectId(items[0].price)===priceId&&items[0].quantity===1;
+  }
+  function roleClueSubscription(sub,entitlement,userSub,customerId){
+    if(!sub||objectId(sub.customer)!==customerId)return false;
+    const storedLink=Boolean(entitlement?.subscriptionId&&sub.id===entitlement.subscriptionId);
+    const currentPriceLink=sub.items?.data?.some(item=>objectId(item.price)===env.STRIPE_PRICE_ID)===true;
+    const metadataLink=sub.metadata?.roleclue_user_id===userSub&&sub.metadata?.roleclue_plan==='monthly';
+    return storedLink||currentPriceLink||metadataLink;
   }
   async function verifiedStarterSession(s,id,userSub,customerId){
     const session=await s.checkout.sessions.retrieve(id,{expand:['line_items.data.price','payment_intent.latest_charge']});
@@ -225,49 +246,105 @@ export async function createBilling(env,dependencies={}){
     return null;
   }
   async function invoiceFor(s,sub,cache){
-    let invoice=sub?.latest_invoice;if(!invoice)return null;
-    if(typeof invoice!=='string')return invoice;
-    if(!cache.has(invoice))cache.set(invoice,await s.invoices.retrieve(invoice));
-    return cache.get(invoice);
+    const id=objectId(sub?.latest_invoice);if(!id)return null;
+    if(!cache.has(id))cache.set(id,await s.invoices.retrieve(id));
+    return cache.get(id);
+  }
+  async function verifiedMonthlyPayment(s,sub,invoice,userSub,customerId){
+    if(!sub||!invoice)return null;
+    const subscriptionItems=sub.items?.data,item=Array.isArray(subscriptionItems)&&subscriptionItems.length===1?subscriptionItems[0]:null;
+    const start=item?.current_period_start??sub.current_period_start,end=item?.current_period_end??sub.current_period_end;
+    const lines=invoice.lines?.data,line=Array.isArray(lines)&&lines.length===1?lines[0]:null;
+    const lineSubscriptionId=objectId(line?.subscription??line?.parent?.subscription_item_details?.subscription??line?.parent?.invoice_item_details?.subscription);
+    const lineProration=line?.parent?.subscription_item_details?.proration??line?.parent?.invoice_item_details?.proration;
+    const metadata=invoice.parent?.subscription_details?.metadata;
+    const exactInvoice=objectId(sub.customer)===customerId&&sub.currency==='aud'&&objectId(item?.price)===env.STRIPE_PRICE_ID&&item?.quantity===1
+      &&invoice.status==='paid'&&objectId(invoice.customer)===customerId&&invoice.parent?.type==='subscription_details'&&invoiceSubscriptionId(invoice)===sub.id
+      &&metadata?.roleclue_user_id===userSub&&metadata.roleclue_plan==='monthly'&&metadata.roleclue_price_id===env.STRIPE_PRICE_ID
+      &&metadata.roleclue_offer==='monthly-aud20-50-v2'&&metadata.terms_version===TERMS_VERSION
+      &&invoice.currency==='aud'&&invoice.collection_method==='charge_automatically'
+      &&['subscription_create','subscription_cycle'].includes(invoice.billing_reason)
+      &&invoice.automatic_tax?.enabled===false&&invoice.amount_due===2000&&invoice.amount_paid===2000
+      &&invoice.amount_remaining===0&&invoice.amount_overpaid===0&&(invoice.amount_paid_off_stripe??0)===0
+      &&invoice.subtotal===2000&&invoice.total===2000&&(invoice.total_excluding_tax===null||invoice.total_excluding_tax===2000)
+      &&invoice.starting_balance===0&&invoice.ending_balance===0
+      &&invoice.pre_payment_credit_notes_amount===0&&invoice.post_payment_credit_notes_amount===0
+      &&emptyArray(invoice.discounts)&&emptyNullableList(invoice.total_discount_amounts)&&emptyNullableList(invoice.total_pretax_credit_amounts)
+      &&emptyArray(invoice.default_tax_rates)&&emptyNullableList(invoice.total_taxes)&&invoice.lines?.has_more===false
+      &&Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>0&&end>start
+      &&line&&line.parent?.type==='subscription_item_details'&&line.pricing?.type==='price_details'
+      &&invoiceLinePriceId(line)===env.STRIPE_PRICE_ID&&lineSubscriptionId===sub.id&&lineProration===false
+      &&line.currency==='aud'&&line.amount===2000&&line.subtotal===2000&&line.quantity===1
+      &&line.period?.start===start&&line.period?.end===end
+      &&emptyArray(line.discounts)&&emptyNullableList(line.discount_amounts)&&emptyNullableList(line.pretax_credit_amounts)&&emptyNullableList(line.taxes);
+    if(!exactInvoice)return null;
+    const payments=await listAll(params=>s.invoicePayments.list(params),{invoice:invoice.id});
+    const paid=payments.filter(payment=>payment.status==='paid');
+    if(paid.length!==1)return null;
+    const payment=paid[0],paymentType=payment.payment?.type;
+    if(objectId(payment.invoice)!==invoice.id||payment.currency!=='aud'||payment.amount_requested!==2000||payment.amount_paid!==2000
+      ||!['payment_intent','charge'].includes(paymentType))return null;
+    let paymentIntent=null,charge=null;
+    if(paymentType==='payment_intent')({paymentIntent,charge}=await chargeForIntent(s,payment.payment.payment_intent));
+    else{charge=payment.payment?.charge;if(typeof charge==='string')charge=await s.charges.retrieve(charge);}
+    if(paymentType==='payment_intent'&&(!paymentIntent||paymentIntent.status!=='succeeded'||objectId(paymentIntent.customer)!==customerId
+      ||paymentIntent.currency!=='aud'||paymentIntent.amount!==2000||paymentIntent.amount_received!==2000))return null;
+    if(!charge||objectId(charge.customer)!==customerId||charge.currency!=='aud'||charge.amount!==2000||charge.amount_captured!==2000
+      ||charge.paid!==true||charge.status!=='succeeded'||charge.captured!==true)return null;
+    if(paymentIntent&&objectId(charge.payment_intent)!==paymentIntent.id)return null;
+    return {refunded:charge.refunded===true,disputed:charge.disputed===true};
+  }
+  async function hasSuccessfulStripePayment(s,sub,invoice,customerId){
+    if(invoice?.status!=='paid'||objectId(invoice.customer)!==customerId||invoiceSubscriptionId(invoice)!==sub.id
+      ||invoice.currency!=='aud'||!Number.isSafeInteger(invoice.amount_paid)||invoice.amount_paid<=0||(invoice.amount_paid_off_stripe??0)!==0)return false;
+    const payments=await listAll(params=>s.invoicePayments.list(params),{invoice:invoice.id});
+    for(const payment of payments){
+      if(payment.status!=='paid'||objectId(payment.invoice)!==invoice.id||payment.currency!=='aud'||!Number.isSafeInteger(payment.amount_paid)||payment.amount_paid<=0)continue;
+      if(payment.payment?.type==='payment_intent'){
+        const {paymentIntent,charge}=await chargeForIntent(s,payment.payment.payment_intent);
+        if(paymentIntent?.status==='succeeded'&&objectId(paymentIntent.customer)===customerId&&paymentIntent.currency==='aud'
+          &&paymentIntent.amount_received>=payment.amount_paid&&charge?.paid===true&&charge.status==='succeeded'&&charge.captured===true
+          &&objectId(charge.customer)===customerId&&charge.currency==='aud'&&charge.amount_captured>=payment.amount_paid)return true;
+      }else if(payment.payment?.type==='charge'){
+        let charge=payment.payment.charge;if(typeof charge==='string')charge=await s.charges.retrieve(charge);
+        if(charge?.paid===true&&charge.status==='succeeded'&&charge.captured===true&&objectId(charge.customer)===customerId
+          &&charge.currency==='aud'&&charge.amount_captured>=payment.amount_paid)return true;
+      }
+    }
+    return false;
   }
   async function syncReconcile(userSub,store){
     const pk=`USER#${userSub}`,row=await store.get(pk,'ENTITLEMENT');if(!row?.value.customerId)return;
     const s=await stripe(),customerId=row.value.customerId;
     const all=await listAll(params=>s.subscriptions.list(params),{customer:customerId,status:'all',expand:['data.latest_invoice']});
-    const matching=all.filter(sub=>sub.items.data.some(item=>item.price.id===env.STRIPE_PRICE_ID));
-    matching.sort((a,b)=>b.created-a.created);
-    const sub=matching.find(x=>['active','trialing'].includes(x.status))??matching[0];
-    const invoices=new Map();let invoice=await invoiceFor(s,sub,invoices),refunded=false,disputed=false;
-    let subscriptionEverPaid=row.value.subscriptionEverPaid===true;
+    const matching=all.filter(sub=>roleClueSubscription(sub,row.value,userSub,customerId));
+    matching.sort((a,b)=>(b.created??0)-(a.created??0));
+    const sub=matching.find(candidate=>hasManagedSubscription({subscriptionId:candidate.id,subscriptionStatus:candidate.status}))??matching[0];
+    const invoices=new Map(),invoice=await invoiceFor(s,sub,invoices),monthlyPayment=await verifiedMonthlyPayment(s,sub,invoice,userSub,customerId);
+    let refunded=monthlyPayment?.refunded===true,disputed=monthlyPayment?.disputed===true;
+    let subscriptionEverPaid=row.value.subscriptionEverPaid===true||Boolean(monthlyPayment);
     // Starter is a try-before-subscription offer. A paid invoice on an older
     // RoleClue catalog price must still make the account permanently
     // ineligible after the configured monthly price is versioned.
-    for(const candidate of all){if((await invoiceFor(s,candidate,invoices))?.status==='paid'){subscriptionEverPaid=true;break;}}
+    if(!subscriptionEverPaid)for(const candidate of matching){const candidateInvoice=await invoiceFor(s,candidate,invoices);if(await hasSuccessfulStripePayment(s,candidate,candidateInvoice,customerId)){subscriptionEverPaid=true;break;}}
     if(!subscriptionEverPaid){
-      for(const candidate of all){
+      for(const candidate of matching){
         const history=await listAll(params=>s.invoices.list(params),{customer:customerId,subscription:candidate.id,status:'paid'});
-        if(history.length){subscriptionEverPaid=true;break;}
-      }
-    }
-    if(invoice?.id){
-      const payments=await listAll(params=>s.invoicePayments.list(params),{invoice:invoice.id});
-      for(const payment of payments){
-        if(payment.status&&payment.status!=='paid')continue;
-        let charge=payment.payment?.charge;
-        const intentId=objectId(payment.payment?.payment_intent);
-        if(intentId)charge=(await chargeForIntent(s,intentId)).charge;
-        else if(typeof charge==='string')charge=await s.charges.retrieve(charge);
-        if(charge?.refunded===true)refunded=true;
-        if(charge?.disputed===true)disputed=true;
+        for(const summary of history){
+          const id=objectId(summary);if(!id)continue;
+          if(!invoices.has(id))invoices.set(id,await s.invoices.retrieve(id));
+          if(await hasSuccessfulStripePayment(s,candidate,invoices.get(id),customerId)){subscriptionEverPaid=true;break;}
+        }
+        if(subscriptionEverPaid)break;
       }
     }
     const starterSnapshot=await findStarter(s,row.value,userSub,customerId);
     const subscriptionStatus=sub?.status??'none';
-    const status=disputed?'disputed':refunded?'refunded':subscriptionStatus==='active'&&invoice?.status!=='paid'?'payment_pending':subscriptionStatus;
+    const status=disputed?'disputed':refunded?'refunded':subscriptionStatus==='active'&&!monthlyPayment?'payment_pending':subscriptionStatus;
     await retryConflict(async()=>{
       const current=await store.get(pk,'ENTITLEMENT');if(!current)return;
       if(current.value.customerId!==customerId)throw unavailable('Billing ownership changed. Refresh and try again.');
-      const e=current.value,item=sub?.items.data.find(x=>x.price.id===env.STRIPE_PRICE_ID);
+      const e=current.value,item=sub?.items?.data?.find(x=>objectId(x.price)===env.STRIPE_PRICE_ID);
       const start=item?.current_period_start??sub?.current_period_start,end=item?.current_period_end??sub?.current_period_end;
       const validPeriod=Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>0&&end>start;
       const key=sub&&validPeriod?`${sub.id}:${start}`:null;
@@ -283,6 +360,55 @@ export async function createBilling(env,dependencies={}){
     const pk='BILLING#locks',sk=userSub,owner=randomUUID();
     await retryConflict(async()=>{const row=await store.get(pk,sk);if(row&&row.value.until>Date.now())throw Error('Billing reconciliation in progress');await store.transact([change(pk,sk,row,{owner,until:Date.now()+120000})]);});
     try{await syncReconcile(userSub,store);}finally{const row=await store.get(pk,sk);if(row?.value.owner===owner)await store.transact([{pk,sk,expected:row.revision,remove:true}]);}
+  }
+  async function deletionState(user,store){
+    const pk=`USER#${user.sub}`,entitlement=(await store.get(pk,'ENTITLEMENT'))?.value,checkout=await store.get(pk,'CHECKOUT');
+    if(!entitlement?.customerId)return {pending:false,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+    const s=await stripe(),customerId=entitlement.customerId,ids=[];
+    const subscriptions=await listAll(params=>s.subscriptions.list(params),{customer:customerId,status:'all'});
+    if(subscriptions.some(subscription=>roleClueSubscription(subscription,entitlement,user.sub,customerId)
+      &&hasManagedSubscription({subscriptionId:subscription.id,subscriptionStatus:subscription.status})))return {pending:false,managedSubscription:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+    if(checkout?.value.sessionId)ids.push(checkout.value.sessionId);
+    const sessions=await listAll(params=>s.checkout.sessions.list(params),{customer:customerId});
+    for(const session of sessions){
+      if(['starter','monthly'].includes(session.metadata?.roleclue_plan)&&session.metadata?.roleclue_user_id===user.sub&&!ids.includes(session.id))ids.push(session.id);
+    }
+    let reconcileSuccessfulStarter=false;
+    for(const id of ids){
+      const session=await s.checkout.sessions.retrieve(id,{expand:['line_items.data.price','payment_intent.latest_charge']});
+      const plan=session.metadata?.roleclue_plan;
+      const ownedRoleClueSession=['starter','monthly'].includes(plan)&&objectId(session.customer)===customerId
+        &&session.client_reference_id===user.sub&&session.metadata?.roleclue_user_id===user.sub;
+      if(!ownedRoleClueSession){
+        if(id===checkout?.value.sessionId)throw unavailable('The current checkout could not be verified before account deletion.');
+        continue;
+      }
+      if(session.status==='open')return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      if(plan==='starter'){
+        const intentId=objectId(session.payment_intent),intent=intentId?await s.paymentIntents.retrieve(intentId,{expand:['latest_charge']}):null;
+        if(intent?.status==='succeeded'){
+          if(intent.id!==intentId||objectId(intent.customer)!==customerId)throw unavailable('The completed starter payment could not be verified before account deletion.');
+          if(validCheckoutOffer(session,plan,user.sub,customerId)){
+            if(!(await verifiedStarterSession(s,id,user.sub,customerId)))throw unavailable('The completed starter payment could not be reconciled before account deletion.');
+            reconcileSuccessfulStarter=true;
+          }
+          continue;
+        }
+        if(['canceled','requires_payment_method'].includes(intent?.status)&&['complete','expired'].includes(session.status))continue;
+        if(session.status==='expired'&&!intent)continue;
+        return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      }
+      if(session.status==='expired')continue;
+      if(session.status!=='complete')return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      const subscriptionId=objectId(session.subscription);
+      if(!subscriptionId)return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      const subscription=await s.subscriptions.retrieve(subscriptionId);
+      if(subscription.id!==subscriptionId||objectId(subscription.customer)!==customerId)throw unavailable('The completed subscription could not be verified before account deletion.');
+      if(hasManagedSubscription({subscriptionId,subscriptionStatus:subscription.status}))return {pending:false,managedSubscription:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      if(!['canceled','incomplete_expired'].includes(subscription.status))return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+    }
+    if(reconcileSuccessfulStarter)await reconcile(user.sub,store);
+    return {pending:false,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
   }
   return {async checkout(user,store,request={}){const s=await stripe(),pk=`USER#${user.sub}`,plan=request.plan??'monthly',priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;if(!['starter','monthly'].includes(plan))throw new HttpError(400,'INVALID_PLAN','Choose a valid billing plan.');const price=await s.prices.retrieve(priceId);const validMonthly=price.active&&price.currency==='aud'&&price.unit_amount===2000&&price.recurring?.interval==='month'&&price.recurring.interval_count===1&&(!price.recurring.usage_type||price.recurring.usage_type==='licensed');const validStarter=price.active&&price.currency==='aud'&&price.unit_amount===100&&!price.recurring;if(plan==='monthly'&&!validMonthly)throw unavailable('The A$20 monthly plan is not configured.');if(plan==='starter'&&!validStarter)throw unavailable('The A$1 starter pack is not configured.');let row=await store.get(pk,'ENTITLEMENT'),e=row?.value??blankEntitlement();if(plan==='monthly'&&hasManagedSubscription(e))return this.portal(user,store);if(plan==='starter'&&(e.starter?.everPaid||e.starter?.purchaseId||e.subscriptionEverPaid))throw new HttpError(409,'STARTER_NOT_ELIGIBLE','The starter pack is available only before a successful starter or subscription payment.');if(!e.customerId){const customer=await s.customers.create({email:user.email,metadata:{roleclue_user_id:user.sub}},{idempotencyKey:`roleclue-customer-${user.sub}`});await retryConflict(async()=>{row=await store.get(pk,'ENTITLEMENT');e=row?.value??blankEntitlement();const mapping=await store.get('BILLING#customers',customer.id);if(mapping&&mapping.value.userSub!==user.sub)throw Error('Customer ownership mismatch');await store.transact([change(pk,'ENTITLEMENT',row,{...e,customerId:customer.id}),change('BILLING#customers',customer.id,mapping,{userSub:user.sub})]);});e=await store.get(pk,'ENTITLEMENT').then(r=>r.value);}
     const expiresAt=Math.floor((request.expiresAt??Date.now()+3600000)/1000);
@@ -343,5 +469,5 @@ export async function createBilling(env,dependencies={}){
     const mapping=await store.get('BILLING#customers',customer);
     if(mapping){const userSub=mapping.value.userSub;if(await store.get('ACCOUNT#deleted',accountTombstoneKey(userSub)))return {received:true};await reconcile(userSub,store);}
     return {received:true};
-  },reconcile};
+  },reconcile,deletionState};
 }

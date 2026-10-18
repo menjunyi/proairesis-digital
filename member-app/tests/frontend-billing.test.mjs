@@ -66,6 +66,8 @@ test("checkout and Portal return URLs trigger verification without granting allo
   assert.equal(billingReturnOutcome("success", starter), "waiting");
   assert.equal(billingReturnOutcome("success", paid), "waiting");
   assert.equal(billingReturnOutcome("success", starter, "starter"), "verified");
+  assert.equal(billingReturnOutcome("success", {...starter, remaining: 0, canGenerate: false}, "starter"), "waiting");
+  assert.equal(billingReturnOutcome("success", {...starter, status: "refunded", plan: "free"}, "starter"), "waiting");
   assert.equal(billingReturnOutcome("success", starter, "monthly"), "waiting");
   assert.equal(billingReturnOutcome("success", paid, "monthly"), "verified");
   assert.equal(billingReturnOutcome("cancelled", free), "cancelled");

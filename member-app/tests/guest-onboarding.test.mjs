@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {MemoryStore, change} from '../server/store.mjs';
-import {createService} from '../server/service.mjs';
+import {createService,GUEST_MAX_RESUME} from '../server/service.mjs';
 import {createHttpHandler} from '../server/handler.mjs';
 import {normalizeJob} from '../server/matching.mjs';
 import {suggestProfileFromResume} from '../server/profile-extraction.mjs';
@@ -58,6 +58,19 @@ test('guest intake fails before resume collection when live search is not approv
   assert.equal(store.items.size,0);
 });
 
+test('guest resume upload accepts 4 MiB and rejects the next byte before extraction',async()=>{
+  let extracts=0;const {service}=await setup({extract:async()=>{extracts++;return parsed;}});
+  const started=await service.startGuest({situation:'actively-looking',location:'Sydney',remote:false},'203.0.113.60');
+  const request={token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf'};
+  const accepted=await service.guestResume({...request,dataBase64:Buffer.alloc(GUEST_MAX_RESUME,1).toString('base64')},'203.0.113.60');
+  assert.equal(accepted.guest.stage,'profile');assert.equal(extracts,1);
+  await assert.rejects(
+    ()=>service.guestResume({...request,dataBase64:Buffer.alloc(GUEST_MAX_RESUME+1,1).toString('base64')},'203.0.113.60'),
+    error=>error.status===413&&error.code==='RESUME_TOO_LARGE',
+  );
+  assert.equal(extracts,1);
+});
+
 test('guest flow stores only a token hash, returns five high-fit roles, preserves ignore and claims once',async()=>{
   const {store,service}=await setup(),{started,uploaded}=await confirmedGuest(service);
   assert.equal(uploaded.guest.profile.workRights,'unknown');
@@ -69,7 +82,10 @@ test('guest flow stores only a token hash, returns five high-fit roles, preserve
   assert.ok(searched.opportunities.every(match=>match.score>=75&&match.job.australia&&match.job.roleFamily==='software'));
   const ignoredId=searched.opportunities[0].job.id,afterIgnore=await service.ignoreGuest({token:started.token,jobId:ignoredId},sourceIp);
   assert.equal(afterIgnore.opportunities.some(match=>match.job.id===ignoredId),false);assert.equal(afterIgnore.opportunities.length,5);
-  const interestedId=afterIgnore.opportunities[0].job.id,claimed=await service.claimGuest(user,{token:started.token,interestedJobId:interestedId},sourceIp);
+  const refreshed=await service.searchGuest({token:started.token},sourceIp),guestPkBeforeClaim=`GUEST#${tokenHash}`;
+  assert.equal(refreshed.opportunities.some(match=>match.job.id===ignoredId),false);
+  assert.ok(await store.get(guestPkBeforeClaim,`JOB#${ignoredId}`));
+  const interestedId=refreshed.opportunities[0].job.id,claimed=await service.claimGuest(user,{token:started.token,interestedJobId:interestedId},sourceIp);
   assert.equal(claimed.application.id,interestedId);assert.equal(claimed.continuation.status,'awaiting-payment');
   assert.equal(claimed.savedOpportunityCount,5);
   await assert.rejects(()=>service.completeContinuation(user,{applicationId:interestedId}),error=>error.status===402);
@@ -77,6 +93,7 @@ test('guest flow stores only a token hash, returns five high-fit roles, preserve
   assert.equal((await store.get('USER#alice',`DECISION#${interestedId}`)).value.decision,'interested');
   assert.deepEqual((await store.get('RECOMMENDATION_REGISTRY','alice')).value,{userSub:'alice'});
   assert.ok(await store.get('USER#alice',`IMPORTED_JOB#${interestedId}`));assert.ok(await store.get('USER#alice',`APP#${interestedId}`));
+  assert.equal((await service.applications(user)).applications[0].job.availability,'available');
   assert.equal((await store.list('USER#alice','IMPORTED_JOB#')).length,5);
   const guestPk=`GUEST#${tokenHash}`,scrubbed=(await store.get(guestPk,'SESSION')).value;
   assert.equal(scrubbed.profile,undefined);assert.equal(scrubbed.suggestions,undefined);assert.equal(scrubbed.resumeWarnings,undefined);assert.equal((await store.list(guestPk,'JOB#')).length,0);
@@ -89,6 +106,20 @@ test('guest flow stores only a token hash, returns five high-fit roles, preserve
   assert.equal(replay.application.id,interestedId);assert.equal((await store.list('USER#alice','APP#')).length,1);
   await assert.rejects(()=>service.abandonGuest(user,{token:started.token},sourceIp),error=>error.code==='GUEST_ALREADY_CLAIMED');
   await assert.rejects(()=>service.claimGuest(other,{token:started.token,interestedJobId:interestedId},'203.0.113.25'),error=>error.code==='GUEST_ALREADY_CLAIMED');
+});
+
+test('guest claim stays below the transaction limit after fifty ignored and thirty current roles',async()=>{
+  const {store,service}=await setup(),{started}=await confirmedGuest(service);
+  const searched=await service.searchGuest({token:started.token},sourceIp);
+  const template=searched.opportunities[0],guestPk=`GUEST#${createHash('sha256').update(started.token).digest('hex')}`;
+  const ignoredIds=Array.from({length:50},(_,index)=>`ignored-${index}`),currentIds=Array.from({length:30},(_,index)=>`current-${index}`);
+  const sessionRow=await store.get(guestPk,'SESSION'),session={...sessionRow.value,stage:'opportunities',ignoredJobIds:ignoredIds,opportunityIds:currentIds};
+  const rows=[...ignoredIds,...currentIds].map(id=>change(guestPk,`JOB#${id}`,null,{assessment:{...template,job:{...template.job,id,url:`https://boards.greenhouse.io/direct/jobs/${encodeURIComponent(id)}`}},searchedAt:new Date().toISOString()}));
+  await store.transact([change(guestPk,'SESSION',sessionRow,session),...rows]);
+  const claimed=await service.claimGuest(user,{token:started.token,interestedJobId:currentIds[0]},sourceIp);
+  assert.equal(claimed.application.id,currentIds[0]);
+  assert.equal((await store.list('USER#alice','DECISION#')).filter(row=>row.value.decision==='ignored').length,30);
+  assert.equal((await store.list(guestPk,'JOB#')).length,0);
 });
 
 test('account deletion removes every linked guest partition before identity revocation',async()=>{
@@ -107,15 +138,29 @@ test('existing account can abandon a conflicting guest continuation without copy
   assert.equal(first.abandoned,true);assert.equal(first.account.profile.resumeText,existing.resumeText);
   assert.equal(first.account.continuation,null);
   const guestRow=await store.get(`GUEST#${createHash('sha256').update(started.token).digest('hex')}`,'SESSION');
-  assert.equal(guestRow.value.stage,'abandoned');assert.ok(guestRow.value.abandonedAt);assert.equal(guestRow.value.profile.resumeText,saved.profile.resumeText);
+  assert.equal(guestRow.value.stage,'abandoned');assert.ok(guestRow.value.abandonedAt);assert.equal(guestRow.value.profile,undefined);
   assert.equal(await store.get('USER#alice',`IMPORTED_JOB#${id}`),null);assert.equal(await store.get('USER#alice',`APP#${id}`),null);
   assert.equal(await store.get('USER#alice',`DECISION#${id}`),null);assert.equal(await store.get('USER#alice','CONTINUATION'),null);
 
   const replay=await service.abandonGuest(user,{token:started.token},sourceIp);
   assert.equal(replay.abandoned,true);assert.equal(replay.account.profile.resumeText,existing.resumeText);
+  const scrubbed=(await store.get(`GUEST#${createHash('sha256').update(started.token).digest('hex')}`,'SESSION')).value;
+  assert.equal(scrubbed.profile,undefined);assert.equal(scrubbed.resumeWarnings,undefined);assert.equal((await store.list(guestRow.pk,'JOB#')).length,0);
+  const reference=(await store.list('USER#alice','GUEST_CLAIM#'))[0];assert.equal(reference.value.guestPartition,guestRow.pk);assert.equal(reference.value.abandoned,true);
   await assert.rejects(()=>service.abandonGuest(other,{token:started.token},'203.0.113.25'),error=>error.code==='GUEST_ALREADY_RESOLVED');
   await assert.rejects(()=>service.claimGuest(user,{token:started.token,interestedJobId:id},sourceIp),error=>error.code==='GUEST_ALREADY_RESOLVED');
   await assert.rejects(()=>service.ignoreGuest({token:started.token,jobId:id},sourceIp),error=>error.code==='GUEST_ALREADY_RESOLVED');
+});
+
+test('account deletion removes an abandoned guest resume partition',async()=>{
+  const {store,service}=await setup(),{started,saved}=await confirmedGuest(service),searched=await service.searchGuest({token:started.token},sourceIp);
+  const existing={...saved.profile,email:user.email,resumeText:'A different confirmed account resume.',location:'Melbourne, Australia',roleFamilies:['data']};
+  await store.transact([change('USER#alice','PROFILE',null,existing)]);
+  await service.abandonGuest(user,{token:started.token},sourceIp);
+  const guestPk=`GUEST#${createHash('sha256').update(started.token).digest('hex')}`;
+  assert.ok(await store.get(guestPk,'SESSION'));assert.ok(searched.opportunities.length);
+  await service.deleteAccount(user,{confirmation:'DELETE'});
+  assert.deepEqual(await store.list(guestPk),[]);
 });
 
 test('guest situation makes the chosen area essential and remote an inclusive alternative',async()=>{
@@ -150,4 +195,12 @@ test('public guest routes need no JWT, reject query tokens, and claim still requ
   assert.equal(query.statusCode,400);assert.equal(JSON.parse(query.body).error.code,'INVALID_QUERY');
   assert.equal((await request('/api/guest/claim','POST',{token,interestedJobId:'x'})).statusCode,401);
   assert.equal((await request('/api/guest/abandon','POST',{token})).statusCode,401);
+});
+
+test('CloudFront source-port changes cannot rotate the guest start rate identity',async()=>{
+  const {service}=await setup(),handler=createHttpHandler(service,{originSecret:'synthetic-origin-secret'});
+  const request=(address,port)=>handler({rawPath:'/api/guest/start',rawQueryString:'',headers:{'x-roleclue-origin':'synthetic-origin-secret','cloudfront-viewer-address':`${address}:${port}`},body:JSON.stringify({situation:'exploring',location:'Sydney',remote:false}),requestContext:{http:{method:'POST',sourceIp:'192.0.2.90'}}});
+  for(let index=0;index<10;index++)assert.equal((await request('198.51.100.24',40000+index)).statusCode,200);
+  const limited=await request('198.51.100.24',50000);assert.equal(limited.statusCode,429);assert.equal(JSON.parse(limited.body).error.code,'GUEST_RATE_LIMIT');
+  assert.equal((await request('198.51.100.25',50000)).statusCode,200);
 });

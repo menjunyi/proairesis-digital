@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createBilling} from '../server/adapters.mjs';
 import {blankEntitlement,billingView,createService,TERMS_VERSION} from '../server/service.mjs';
 import {createHttpHandler} from '../server/handler.mjs';
@@ -8,21 +9,32 @@ import {MemoryStore,change} from '../server/store.mjs';
 const user={sub:'alice',email:'alice@example.test'};
 const env={STRIPE_SECRET_KEY_PARAM:'synthetic',STRIPE_WEBHOOK_SECRET_PARAM:'synthetic',STRIPE_PRICE_ID:'price_twenty_v2',STRIPE_STARTER_PRICE_ID:'price_starter',SITE_URL:'https://app.example.test'};
 const now=Math.floor(Date.now()/1000);
-const subscription=()=>({id:'sub_alice',customer:'cus_alice',created:now-100,status:'active',cancel_at_period_end:false,items:{data:[{price:{id:env.STRIPE_PRICE_ID},current_period_start:now-100,current_period_end:now+86400}]},latest_invoice:{id:'in_current',status:'paid'}});
+const monthlyMetadata={roleclue_user_id:'alice',roleclue_plan:'monthly',roleclue_price_id:env.STRIPE_PRICE_ID,roleclue_offer:'monthly-aud20-50-v2',terms_version:TERMS_VERSION};
+const subscription=()=>({id:'sub_alice',customer:'cus_alice',currency:'aud',created:now-100,status:'active',cancel_at_period_end:false,metadata:monthlyMetadata,items:{data:[{price:{id:env.STRIPE_PRICE_ID},quantity:1,current_period_start:now-100,current_period_end:now+86400}]},latest_invoice:'in_current'});
 const price=()=>({id:env.STRIPE_PRICE_ID,active:true,currency:'aud',unit_amount:2000,recurring:{interval:'month',interval_count:1,usage_type:'licensed'}});
 const starterPrice=()=>({id:env.STRIPE_STARTER_PRICE_ID,active:true,currency:'aud',unit_amount:100,recurring:null});
 const event=type=>JSON.stringify({id:'evt_synthetic',type,data:{object:{customer:'cus_alice',metadata:{roleclue_user_id:'mallory'}}}});
 
+function monthlyInvoice(sub,id='in_current'){
+  const item=sub.items.data.find(candidate=>candidate.price.id===env.STRIPE_PRICE_ID)??sub.items.data[0],start=item.current_period_start,end=item.current_period_end;
+  return {id,status:'paid',customer:sub.customer,currency:'aud',collection_method:'charge_automatically',billing_reason:'subscription_cycle',automatic_tax:{enabled:false},
+    amount_due:2000,amount_paid:2000,amount_remaining:0,amount_overpaid:0,amount_paid_off_stripe:0,subtotal:2000,total:2000,total_excluding_tax:2000,
+    starting_balance:0,ending_balance:0,pre_payment_credit_notes_amount:0,post_payment_credit_notes_amount:0,discounts:[],total_discount_amounts:[],total_pretax_credit_amounts:[],default_tax_rates:[],total_taxes:[],
+    period_start:start-3600,period_end:end-3600,parent:{type:'subscription_details',subscription_details:{subscription:sub.id,metadata:monthlyMetadata}},
+    lines:{data:[{id:'il_current',invoice:id,currency:'aud',amount:2000,subtotal:2000,quantity:1,period:{start,end},subscription:sub.id,parent:{type:'subscription_item_details',subscription_item_details:{subscription:sub.id,subscription_item:'si_current',invoice_item:null,proration:false,proration_details:null}},pricing:{type:'price_details',price_details:{price:env.STRIPE_PRICE_ID,product:'prod_monthly'},unit_amount_decimal:'2000'},discounts:[],discount_amounts:[],pretax_credit_amounts:[],taxes:[]}],has_more:false}};
+}
+
 async function fixture(overrides={}){
   const store=new MemoryStore(),entitlement={...blankEntitlement(),customerId:'cus_alice',subscriptionId:'sub_alice',status:'active',free:{used:1,reserved:0},paid:{key:`sub_alice:${now-100}`,used:7,reserved:0}};
   await store.transact([change('USER#alice','ENTITLEMENT',null,entitlement),change('BILLING#customers','cus_alice',null,{userSub:'alice'})]);
-  const state={sub:subscription(),payments:[],charge:{id:'ch_current',refunded:false},checkout:[],expired:[],portals:[],prices:price()};
+  const state={sub:subscription(),invoice:{},payments:[],charge:{id:'ch_current',customer:'cus_alice',currency:'aud',amount:2000,amount_captured:2000,paid:true,status:'succeeded',captured:true,refunded:false,disputed:false,payment_intent:'pi_current'},intent:{id:'pi_current',customer:'cus_alice',currency:'aud',amount:2000,amount_received:2000,status:'succeeded',latest_charge:'ch_current'},checkout:[],expired:[],portals:[],prices:price()};
+  state.payments=[{id:'inpay_current',status:'paid',invoice:'in_current',currency:'aud',amount_requested:2000,amount_paid:2000,payment:{type:'payment_intent',payment_intent:'pi_current'}}];
   const client={
     subscriptions:{async list(){return {data:state.sub?[state.sub]:[],has_more:false};},async retrieve(){return state.completedSub??state.sub;}},
-    invoicePayments:{async list(){return {data:state.payments,has_more:false};}},
-    paymentIntents:{async retrieve(){return {latest_charge:state.charge};}},
+    invoicePayments:{async list({invoice}){return {data:state.paymentsByInvoice?.[invoice]??state.payments,has_more:false};}},
+    paymentIntents:{async retrieve(){return {...state.intent,latest_charge:state.charge};}},
     charges:{async retrieve(){return state.charge;}},
-    invoices:{async retrieve(id){return {id,status:'paid'};},async list(){return {data:state.invoiceHistory??[],has_more:false};}},
+    invoices:{async retrieve(id){const currentId=typeof state.sub?.latest_invoice==='string'?state.sub.latest_invoice:state.sub?.latest_invoice?.id;return {...monthlyInvoice(state.sub,id),...(id===currentId?state.invoice:{}),...(state.invoiceById?.[id]??{})};},async list(){return {data:state.invoiceHistory??[],has_more:false};}},
     prices:{async retrieve(id){return id===env.STRIPE_STARTER_PRICE_ID?starterPrice():state.prices;}},
     checkout:{sessions:{async list(){return {data:[],has_more:false};},async create(params,options){state.checkout.push({params,options});return {id:'cs_synthetic',url:'https://checkout.stripe.com/synthetic',expires_at:params.expires_at,automatic_tax:params.automatic_tax};},async expire(id){state.expired.push(id);return {id,status:'expired'};},async retrieve(){return {id:'cs_synthetic',mode:'subscription',customer:'cus_alice',client_reference_id:'alice',status:state.checkoutStatus??'open',expires_at:now+3600,subscription:state.checkoutSubscriptionId??'sub_alice',automatic_tax:{enabled:false},metadata:{roleclue_plan:'monthly',roleclue_price_id:env.STRIPE_PRICE_ID,terms_version:TERMS_VERSION},line_items:{data:[{price:{id:env.STRIPE_PRICE_ID},quantity:1}]}};}}},
     billingPortal:{sessions:{async create(params){state.portals.push(params);return {url:'https://billing.stripe.com/synthetic'};}}},
@@ -41,19 +53,60 @@ test('billing stays disabled unless both fixed catalog prices are configured',as
 
 test('active subscription requires a verified paid invoice and retains usage while payment is pending',async()=>{
   const {state,store,billing}=await fixture();
-  state.sub.latest_invoice.status='open';
+  state.invoice.status='open';
   await billing.webhook(event('checkout.session.completed'),'valid',store);
   let e=(await store.get('USER#alice','ENTITLEMENT')).value;
   assert.equal(e.status,'payment_pending');assert.equal(e.subscriptionStatus,'active');assert.equal(billingView(e).canGenerate,false);assert.equal(e.paid.used,7);
-  state.sub.latest_invoice.status='paid';
+  state.invoice.status='paid';
   await billing.webhook(event('invoice.paid'),'valid',store);
   e=(await store.get('USER#alice','ENTITLEMENT')).value;
   assert.equal(billingView(e).remaining,43);assert.equal(e.paid.used,7);
 });
 
+test('monthly entitlement requires exact canonical A$20 Stripe settlement evidence',async t=>{
+  const cases=[
+    ['foreign invoice customer',state=>{state.invoice.customer='cus_other';}],
+    ['foreign invoice subscription',state=>{const base=monthlyInvoice(state.sub);state.invoice.parent={...base.parent,subscription_details:{...base.parent.subscription_details,subscription:'sub_other'}};}],
+    ['foreign immutable account metadata',state=>{const base=monthlyInvoice(state.sub);state.invoice.parent={...base.parent,subscription_details:{...base.parent.subscription_details,metadata:{...monthlyMetadata,roleclue_user_id:'mallory'}}};}],
+    ['discount',state=>{state.invoice.discounts=['di_1'];state.invoice.total_discount_amounts=[{amount:100,discount:'di_1'}];}],
+    ['credit balance',state=>{state.invoice.starting_balance=-100;state.invoice.amount_due=1900;state.invoice.amount_paid=1900;}],
+    ['off-Stripe payment',state=>{state.invoice.amount_paid_off_stripe=2000;}],
+    ['automatic tax',state=>{state.invoice.automatic_tax={enabled:true};}],
+    ['wrong invoice line price',state=>{const base=monthlyInvoice(state.sub);base.lines.data[0].pricing.price_details.price='price_other';state.invoice.lines=base.lines;}],
+    ['missing InvoicePayment',state=>{state.payments=[];}],
+    ['external payment record',state=>{state.payments=[{...state.payments[0],payment:{type:'payment_record',payment_record:'ipr_external'}}];}],
+    ['foreign PaymentIntent',state=>{state.intent.customer='cus_other';}],
+    ['uncaptured charge',state=>{state.charge.captured=false;state.charge.amount_captured=0;}],
+  ];
+  for(const [name,mutate] of cases)await t.test(name,async()=>{
+    const {state,store,billing}=await fixture();mutate(state);await billing.reconcile(user.sub,store);
+    const entitlement=(await store.get('USER#alice','ENTITLEMENT')).value;
+    assert.equal(entitlement.status,'payment_pending');assert.equal(entitlement.paid.used,7);assert.equal(entitlement.paid.reserved,0);assert.equal(billingView(entitlement).canGenerate,false);
+  });
+});
+
+test('a zero-value paid invoice does not count as a successful Plus payment',async()=>{
+  const {state,store,billing}=await fixture();
+  Object.assign(state.invoice,{amount_due:0,amount_paid:0,subtotal:0,total:0,total_excluding_tax:0});state.payments=[];
+  await billing.reconcile(user.sub,store);
+  const entitlement=(await store.get('USER#alice','ENTITLEMENT')).value;
+  assert.equal(entitlement.subscriptionEverPaid,false);assert.equal(billingView(entitlement).canPurchaseStarter,true);assert.equal(billingView(entitlement).canGenerate,false);
+});
+
+test('a current-price subscription without metadata stays managed but receives no allowance',async()=>{
+  const {state,store,billing,service}=await fixture();
+  state.sub.metadata={};
+  const row=await store.get('USER#alice','ENTITLEMENT');await store.transact([change(row.pk,row.sk,row,{...row.value,subscriptionId:null,status:'none',subscriptionStatus:'none'})]);
+  const base=monthlyInvoice(state.sub);state.invoice.parent={...base.parent,subscription_details:{...base.parent.subscription_details,metadata:{}}};
+  await billing.reconcile(user.sub,store);
+  const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);
+  assert.equal(view.hasSubscription,true);assert.equal(view.canGenerate,false);assert.equal(view.remaining,0);
+  assert.match((await service.checkout(user,{termsAccepted:true})).url,/billing\.stripe\.com/);
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');
+});
+
 test('refund revokes paid credit but keeps the subscription managed and prevents a second subscription or deletion',async()=>{
   const {state,store,billing,service}=await fixture();
-  state.payments=[{id:'inpay_current',status:'paid',payment:{type:'payment_intent',payment_intent:{id:'pi_current'}}}];
   state.charge.refunded=true;
   await billing.webhook(event('charge.refunded'),'valid',store);
   const e=(await store.get('USER#alice','ENTITLEMENT')).value,view=billingView(e);
@@ -64,7 +117,7 @@ test('refund revokes paid credit but keeps the subscription managed and prevents
 
 test('direct-charge full refunds are checked while partial refunds do not consume or reset usage',async()=>{
   const {state,store,billing}=await fixture();
-  state.payments=[{id:'inpay_current',status:'paid',payment:{type:'charge',charge:'ch_current'}}];
+  state.payments=[{...state.payments[0],payment:{type:'charge',charge:'ch_current'}}];
   state.charge.amount_refunded=500;
   await billing.reconcile(user.sub,store);
   assert.equal((await store.get('USER#alice','ENTITLEMENT')).value.status,'active');
@@ -161,7 +214,7 @@ test('wrong amount, currency, interval, usage type, or inactive price cannot cre
 test('subscription and invoice-payment history are paginated before reconciling entitlement',async()=>{
   const {state,billing,store,client}=await fixture();let subCalls=0,paymentCalls=0;
   client.subscriptions.list=async params=>{subCalls++;return params.starting_after?{data:[state.sub],has_more:false}:{data:[{id:'sub_other',created:1,status:'canceled',items:{data:[{price:{id:'price_other'}}]}}],has_more:true};};
-  client.invoicePayments.list=async params=>{paymentCalls++;return params.starting_after?{data:[{id:'inpay_refund',status:'paid',payment:{charge:'ch_current'}}],has_more:false}:{data:[{id:'inpay_open',status:'open'}],has_more:true};};
+  client.invoicePayments.list=async params=>{paymentCalls++;return params.starting_after?{data:[{id:'inpay_refund',status:'paid',invoice:'in_current',currency:'aud',amount_requested:2000,amount_paid:2000,payment:{type:'charge',charge:'ch_current'}}],has_more:false}:{data:[{id:'inpay_open',status:'open'}],has_more:true};};
   state.charge.refunded=true;await billing.reconcile(user.sub,store);
   assert.equal(subCalls,2);assert.equal(paymentCalls,2);assert.equal((await store.get('USER#alice','ENTITLEMENT')).value.status,'refunded');
 });
@@ -180,6 +233,22 @@ test('deletion rechecks Stripe so a delayed activation webhook cannot leave a pa
   await store.transact([change('USER#alice','ENTITLEMENT',row,{...row.value,subscriptionId:null,status:'none'})]);
   await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');
   assert.equal(await store.get('USER#alice','DELETING'),null);
+});
+
+test('deletion catches a managed subscription that appears after initial reconciliation',async()=>{
+  const {state,service,store,client}=await fixture();let calls=0;
+  client.subscriptions.list=async()=>({data:++calls===1?[]:[state.sub],has_more:false});
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');
+  assert.equal(calls,2);assert.equal(await store.get('USER#alice','DELETING'),null);
+});
+
+test('a completed legacy monthly checkout blocks deletion when subscription listing is stale',async()=>{
+  const {state,store,service,client}=await fixture();state.sub=null;
+  await store.transact([change('USER#alice','CHECKOUT',null,{plan:'monthly',sessionId:'cs_legacy_monthly',expiresAt:Date.now()-1})]);
+  client.checkout.sessions.retrieve=async()=>({id:'cs_legacy_monthly',mode:'subscription',status:'complete',customer:'cus_alice',client_reference_id:'alice',subscription:'sub_legacy',metadata:{roleclue_user_id:'alice',roleclue_plan:'monthly',roleclue_price_id:'price_legacy',roleclue_offer:'monthly-aud20-40-v1',terms_version:'legacy-terms'},line_items:{data:[{price:{id:'price_legacy'},quantity:1}]}});
+  client.subscriptions.retrieve=async()=>({id:'sub_legacy',customer:'cus_alice',status:'active',metadata:{roleclue_user_id:'alice',roleclue_plan:'monthly'},items:{data:[{price:{id:'price_legacy'},quantity:1}]}});
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');
+  assert.ok(await store.get('USER#alice','ENTITLEMENT'));assert.equal(await store.get('USER#alice','DELETING'),null);
 });
 
 test('completed checkout links are replaced after a subscription ends, while open links are reused',async()=>{
@@ -296,8 +365,8 @@ async function starterFixture(){
   const store=new MemoryStore(),entitlement={...blankEntitlement(),customerId:'cus_starter'};
   await store.transact([change('USER#alice','ENTITLEMENT',null,entitlement),change('BILLING#customers','cus_starter',null,{userSub:'alice'})]);
   const starterMetadata={roleclue_plan:'starter',roleclue_user_id:'alice',roleclue_price_id:env.STRIPE_STARTER_PRICE_ID,roleclue_offer:'starter-aud1-2-lifetime-v1',terms_version:TERMS_VERSION};
-  const state={created:[],sessions:[],charge:{id:'ch_starter',customer:'cus_starter',refunded:false,disputed:false},intent:{id:'pi_starter',customer:'cus_starter',status:'succeeded',currency:'aud',amount:100,amount_received:100,metadata:starterMetadata,latest_charge:'ch_starter'}};
-  const fullSession=()=>({id:'cs_starter',mode:'payment',status:'complete',payment_status:'paid',customer:'cus_starter',client_reference_id:'alice',currency:'aud',amount_total:100,created:now,automatic_tax:{enabled:false},metadata:starterMetadata,line_items:{data:[{price:{id:env.STRIPE_STARTER_PRICE_ID},quantity:1}]},payment_intent:'pi_starter',expires_at:now+3600});
+  const state={created:[],sessions:[],session:{},charge:{id:'ch_starter',customer:'cus_starter',refunded:false,disputed:false},intent:{id:'pi_starter',customer:'cus_starter',status:'succeeded',currency:'aud',amount:100,amount_received:100,metadata:starterMetadata,latest_charge:'ch_starter'}};
+  const fullSession=()=>({id:'cs_starter',mode:'payment',status:'complete',payment_status:state.intent.status==='succeeded'?'paid':'unpaid',customer:'cus_starter',client_reference_id:'alice',currency:'aud',amount_total:100,created:now,automatic_tax:{enabled:false},metadata:starterMetadata,line_items:{data:[{price:{id:env.STRIPE_STARTER_PRICE_ID},quantity:1}]},payment_intent:'pi_starter',expires_at:now+3600,...state.session});
   const client={
     subscriptions:{async list(){return {data:[],has_more:false};}},
     prices:{async retrieve(id){return id===env.STRIPE_STARTER_PRICE_ID?starterPrice():price();}},
@@ -341,6 +410,60 @@ test('a paid object with stale terms or mismatched provider metadata cannot gran
   const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);assert.equal(view.plan,'free');assert.equal(view.canGenerate,false);assert.equal(view.canPurchaseStarter,true);
 });
 
+test('account deletion blocks every unsettled Starter PaymentIntent from canonical Stripe state',async t=>{
+  for(const status of ['processing','requires_action','requires_capture','requires_confirmation','unknown_future_state'])await t.test(status,async()=>{
+    const {state,store,service,fullSession}=await starterFixture();state.intent.status=status;state.sessions=[fullSession()];
+    await store.transact([change('USER#alice','CHECKOUT',null,{plan:'starter',sessionId:'cs_starter',expiresAt:Date.now()-1})]);
+    await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CHECKOUT_PENDING');
+    assert.ok(await store.get('USER#alice','ENTITLEMENT'));assert.equal(await store.get('ACCOUNT#deleted',createHash('sha256').update('alice').digest('hex')),null);
+  });
+});
+
+test('canonical Starter processing blocks deletion without a local checkout record',async()=>{
+  const {state,store,service,fullSession}=await starterFixture();state.intent.status='processing';state.sessions=[fullSession()];
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CHECKOUT_PENDING');
+  assert.ok(await store.get('USER#alice','ENTITLEMENT'));
+});
+
+test('terminal failed or canceled Starter settlement permits deletion after provider verification',async t=>{
+  for(const status of ['requires_payment_method','canceled'])await t.test(status,async()=>{
+    const {state,store,service,fullSession}=await starterFixture();state.intent.status=status;state.sessions=[fullSession()];
+    await store.transact([change('USER#alice','CHECKOUT',null,{plan:'starter',sessionId:'cs_starter',expiresAt:Date.now()+3600000})]);
+    assert.deepEqual(await service.deleteAccount(user,{confirmation:'DELETE'}),{deleted:true});assert.deepEqual(await store.list('USER#alice'),[]);
+  });
+});
+
+test('a succeeded Starter payment is reconciled before account deletion',async()=>{
+  const {state,store,billing,service,fullSession}=await starterFixture();state.sessions=[fullSession()];
+  await store.transact([change('USER#alice','CHECKOUT',null,{plan:'starter',sessionId:'cs_starter',expiresAt:Date.now()-1})]);
+  const original=billing.deletionState.bind(billing);let reconciled=false;
+  billing.deletionState=async(...args)=>{const entitlement=(await store.get('USER#alice','ENTITLEMENT')).value;reconciled=entitlement.starter.everPaid===true&&entitlement.starter.purchaseId==='pi_starter';return original(...args);};
+  assert.deepEqual(await service.deleteAccount(user,{confirmation:'DELETE'}),{deleted:true});assert.equal(reconciled,true);
+});
+
+test('legacy Starter offers still block deletion until settlement becomes terminal',async()=>{
+  const {state,store,service,fullSession}=await starterFixture();state.intent.status='processing';
+  state.session={metadata:{...fullSession().metadata,roleclue_offer:'starter-aud1-legacy',terms_version:'legacy-terms'},line_items:{data:[{price:{id:'price_starter_legacy'},quantity:1}]}};
+  state.sessions=[fullSession()];
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CHECKOUT_PENDING');assert.ok(await store.get('USER#alice','ENTITLEMENT'));
+});
+
+test('a succeeded legacy Starter payment is terminal and permits deletion without current-offer credit',async()=>{
+  const {state,store,service,fullSession}=await starterFixture();
+  state.session={metadata:{...fullSession().metadata,roleclue_offer:'starter-aud1-legacy',terms_version:'legacy-terms'},line_items:{data:[{price:{id:'price_starter_legacy'},quantity:1}]}};
+  state.sessions=[fullSession()];
+  assert.deepEqual(await service.deleteAccount(user,{confirmation:'DELETE'}),{deleted:true});
+  assert.deepEqual(await store.list('USER#alice'),[]);
+});
+
+test('a succeeded legacy Starter intent for another customer cannot authorize deletion',async()=>{
+  const {state,store,service,fullSession}=await starterFixture();state.intent.customer='cus_other';
+  state.session={metadata:{...fullSession().metadata,roleclue_offer:'starter-aud1-legacy',terms_version:'legacy-terms'},line_items:{data:[{price:{id:'price_starter_legacy'},quantity:1}]}};
+  state.sessions=[fullSession()];
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.status===503);
+  assert.ok(await store.get('USER#alice','ENTITLEMENT'));assert.equal(await store.get('USER#alice','DELETING'),null);
+});
+
 test('monthly allowance is consumed before starter and unused starter credit returns after the subscription ends',async()=>{
   const {state,store,billing}=await starterFixture();state.sessions=[{id:'cs_starter',mode:'payment',created:now,metadata:{roleclue_plan:'starter'}}];await billing.reconcile(user.sub,store);
   let row=await store.get('USER#alice','ENTITLEMENT');row.value.starter.used=1;row.value.status='active';row.value.subscriptionStatus='active';row.value.subscriptionId='sub_monthly';row.value.periodEnd=new Date(Date.now()+86400000).toISOString();row.value.paid={key:'sub_monthly:period',used:49,reserved:0};await store.transact([change(row.pk,row.sk,row,row.value)]);
@@ -367,16 +490,19 @@ test('a successful subscription payment permanently removes starter eligibility'
 });
 
 test('historical paid invoices keep starter ineligible when the latest subscription invoice is unpaid',async()=>{
-  const {state,store,billing,service}=await fixture();state.sub.latest_invoice={id:'in_latest',status:'open'};state.invoiceHistory=[{id:'in_older_paid',status:'paid'}];
+  const {state,store,billing,service}=await fixture();state.sub.latest_invoice='in_latest';state.invoice.status='open';state.invoiceHistory=[{id:'in_older_paid',status:'paid'}];
+  state.paymentsByInvoice={in_latest:[],in_older_paid:[{...state.payments[0],id:'inpay_older',invoice:'in_older_paid'}]};
   await billing.reconcile(user.sub,store);
   const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);assert.equal(view.subscriptionEverPaid,true);assert.equal(view.canPurchaseStarter,false);
   await assert.rejects(service.checkout(user,{plan:'starter',termsAccepted:true}),error=>error.code==='STARTER_NOT_ELIGIBLE');
 });
 
-test('a paid subscription on the previous catalog price permanently blocks Starter',async()=>{
-  const {state,store,billing,service}=await fixture();state.sub.items.data[0].price.id='price_previous_monthly';
+test('a locally linked paid subscription on the previous catalog price stays managed without metadata and permanently blocks Starter',async()=>{
+  const {state,store,billing,service}=await fixture();state.sub.items.data[0].price.id='price_previous_monthly';state.sub.metadata={};
   await billing.reconcile(user.sub,store);
   const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);
-  assert.equal(view.subscriptionEverPaid,true);assert.equal(view.canPurchaseStarter,false);
+  assert.equal(view.subscriptionEverPaid,true);assert.equal(view.canPurchaseStarter,false);assert.equal(view.hasSubscription,true);assert.equal(view.canGenerate,false);
   await assert.rejects(service.checkout(user,{plan:'starter',termsAccepted:true}),error=>error.code==='STARTER_NOT_ELIGIBLE');
+  assert.match((await service.checkout(user,{plan:'monthly',termsAccepted:true})).url,/billing\.stripe\.com/);
+  await assert.rejects(service.deleteAccount(user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');
 });

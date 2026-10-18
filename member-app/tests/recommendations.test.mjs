@@ -13,10 +13,11 @@ const feed={status:async()=>({status:'not-configured',lastUpdatedAt:null}),jobs:
 async function fixture(){
   const store=new MemoryStore();
   await store.transact([change('USER#alice','PROFILE',null,profileFor(alice)),change('USER#bob','PROFILE',null,profileFor(bob))]);
-  const calls={alice:0,bob:0};let failing=false,aliceJobs=jobsFor('alice'),bobJobs=jobsFor('bob');const queued=[];
+  const calls={alice:0,bob:0};let failing=false,legacyFailing=false,aliceJobs=jobsFor('alice'),bobJobs=jobsFor('bob');const queued=[];
   const guestSearch={available:async()=>true,async search(profile){calls[profile.email.startsWith('alice')?'alice':'bob']++;if(failing)throw Object.assign(Error('Source unavailable'),{status:503,code:'JOB_SEARCH_UNAVAILABLE'});return {jobs:profile.email.startsWith('alice')?aliceJobs:bobJobs,source:{name:'Freehire',status:'ready',fetchedAt:new Date().toISOString()}};}};
-  const service=createService({store,feed,guestSearch,dispatch:async message=>{queued.push(message);}});
-  return {store,service,calls,queued,setFailing:value=>{failing=value;},setAliceJobs:value=>{aliceJobs=value;}};
+  const legacyFeed={status:async()=>{if(legacyFailing)throw Error('Legacy source unavailable');return feed.status();},jobs:async()=>{if(legacyFailing)throw Error('Legacy source unavailable');return feed.jobs();},refresh:feed.refresh};
+  const service=createService({store,feed:legacyFeed,guestSearch,dispatch:async message=>{queued.push(message);}});
+  return {store,service,calls,queued,setFailing:value=>{failing=value;},setLegacyFailing:value=>{legacyFailing=value;},setAliceJobs:value=>{aliceJobs=value;}};
 }
 
 async function makeStale(store,sub='alice'){
@@ -54,13 +55,22 @@ test('a source failure retains the last verified cache and backs off automatic r
 });
 
 test('cached jobs support decisions while refresh preserves decisions and application snapshots',async()=>{
-  const {store,service,setAliceJobs}=await fixture();const first=await service.opportunities(alice),interested=first.opportunities[0],ignored=first.opportunities[1];
+  const {store,service,setAliceJobs,setLegacyFailing}=await fixture();const first=await service.opportunities(alice),interested=first.opportunities[0],ignored=first.opportunities[1];
   await service.decision(alice,interested.job.id,{decision:'interested'});await service.decision(alice,ignored.job.id,{decision:'ignored'});
+  assert.equal((await service.applications(alice)).applications[0].job.availability,'available');
   setAliceJobs(jobsFor('replacement',8));await service.refreshOpportunities(alice,{});
-  assert.equal((await service.applications(alice)).applications[0].job.id,interested.job.id);
   assert.equal((await store.get('USER#alice',`DECISION#${interested.job.id}`)).value.decision,'interested');
-  assert.equal((await store.get('USER#alice',`DECISION#${ignored.job.id}`)).value.decision,'ignored');
+  const ignoredDecision=(await store.get('USER#alice',`DECISION#${ignored.job.id}`)).value;
+  assert.equal(ignoredDecision.decision,'ignored');assert.equal(ignoredDecision.assessmentSnapshot.job.id,ignored.job.id);
   assert.ok((await service.opportunities(alice)).opportunities.every(item=>item.job.id!==interested.job.id&&item.job.id!==ignored.job.id));
+  const ignoredAfterRefresh=await service.opportunities(alice,true);assert.equal(ignoredAfterRefresh.opportunities.some(item=>item.job.id===ignored.job.id),true);
+  setLegacyFailing(true);
+  const application=(await service.applications(alice)).applications[0];assert.equal(application.job.id,interested.job.id);assert.equal(application.job.availability,'unknown');
+  await service.decision(alice,ignored.job.id,{decision:'undecided'});
+  setLegacyFailing(false);
+  assert.equal((await service.opportunities(alice,true)).opportunities.some(item=>item.job.id===ignored.job.id),false);
+  assert.equal((await service.opportunities(alice)).opportunities.some(item=>item.job.id===ignored.job.id),true);
+  assert.equal((await store.get('USER#alice',`DECISION#${ignored.job.id}`)).value.assessmentSnapshot.job.id,ignored.job.id);
 });
 
 test('refresh HTTP route is authenticated, forced and accepts only an empty object',async()=>{

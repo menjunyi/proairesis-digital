@@ -60,6 +60,7 @@ import { canRequestLetter, listingAvailability } from "./availability";
 import {
   capabilitiesFor,
   continuationRecovery,
+  generationFailureMessage,
   guestJourneyAvailable,
   memberRoute,
   mergeApplicationUpdate,
@@ -76,9 +77,12 @@ import {
 } from "./billing-state";
 import GuestJourney from "./GuestJourney.jsx";
 import {
+  clearAccountBrowserState,
   clearContinuation,
   clearGuestState,
+  completedContinuationApplicationId,
   readContinuation,
+  reconcileClaimedContinuation,
   rememberApplication,
   saveContinuation,
   takeRememberedApplication,
@@ -402,13 +406,21 @@ export default function App() {
     }
     setSession(next);
   }
+  function acceptAccount(result) {
+    const nextContinuation = reconcileClaimedContinuation(
+      readContinuation(),
+      result?.continuation,
+    );
+    setContinuation(nextContinuation);
+    setMe(result);
+    return result;
+  }
   async function refreshMe() {
     const version = sessionVersion.current;
     const result = await api("/me");
     if (version !== sessionVersion.current || !readSession())
       throw new Error("Your session changed. Please sign in again.");
-    setMe(result);
-    return result;
+    return acceptAccount(result);
   }
   async function openContinuationApplication(applicationId) {
     if (!api || !applicationId || completionPending.current) return;
@@ -420,8 +432,8 @@ export default function App() {
         method: "POST",
         body: { applicationId },
       });
-      const completedId = result.applicationId || applicationId;
-      rememberApplication(completedId);
+      const completedId = completedContinuationApplicationId(result);
+      if (completedId) rememberApplication(completedId);
       setApplicationTarget(completedId);
       setMe((current) =>
         current ? { ...current, continuation: null } : current,
@@ -496,7 +508,7 @@ export default function App() {
     api("/me")
       .then((result) => {
         if (active && version === sessionVersion.current && readSession())
-          setMe(result);
+          acceptAccount(result);
       })
       .catch((err) => {
         if (active && version === sessionVersion.current) {
@@ -570,17 +582,6 @@ export default function App() {
     };
   }, [api, session, me, continuation?.token, continuation?.jobId, continuation?.claimed, continuationAttempt]);
   useEffect(() => {
-    if (!me?.continuation?.pendingApplicationId || continuation?.applicationId)
-      return;
-    const next = saveContinuation({
-      applicationId: me.continuation.pendingApplicationId,
-      jobId: me.continuation.pendingApplicationId,
-      claimed: true,
-      awaitingAuth: false,
-    });
-    setContinuation(next);
-  }, [me?.continuation?.pendingApplicationId, continuation?.applicationId]);
-  useEffect(() => {
     if (!continuation?.applicationId || !me?.billing?.canGenerate) return;
     void openContinuationApplication(continuation.applicationId);
   }, [continuation?.applicationId, me?.billing?.canGenerate]);
@@ -594,6 +595,11 @@ export default function App() {
     sessionVersion.current += 1;
     setSession(null);
     setMe(null);
+    setContinuation(null);
+    setContinuationStatus("");
+    setContinuationError(null);
+    setContinuationGateMessage("");
+    setApplicationTarget(null);
     setNotice("");
     setPaywall(false);
     setShowGateAccount(false);
@@ -604,6 +610,7 @@ export default function App() {
     clearGuestState();
     clearContinuation();
     setContinuation(null);
+    setApplicationTarget(null);
     setContinuationError(null);
     setContinuationStatus("");
     setShowAuth(false);
@@ -613,13 +620,14 @@ export default function App() {
     if (restart) clearGuestState();
     clearContinuation();
     setContinuation(null);
+    setApplicationTarget(null);
     setContinuationError(null);
     setContinuationStatus("");
     setShowAuth(false);
     setPaywall(false);
     setShowGateAccount(false);
     sessionVersion.current += 1;
-    void signOut(config);
+    void signOut(config, { preserveGuestState: !restart });
     setSession(null);
     setMe(null);
     window.location.hash = "";
@@ -830,12 +838,12 @@ export default function App() {
             onNotice={setNotice}
             onDeleted={() => {
               clearSession();
-              clearGuestState();
-              clearContinuation();
+              clearAccountBrowserState();
               sessionVersion.current += 1;
               setSession(null);
               setMe(null);
               setContinuation(null);
+              setApplicationTarget(null);
               setShowGateAccount(false);
             }}
           />
@@ -1110,9 +1118,12 @@ export default function App() {
                       if (renderedSessionVersion !== sessionVersion.current)
                         return;
                       clearSession();
+                      clearAccountBrowserState();
                       sessionVersion.current += 1;
                       setSession(null);
                       setMe(null);
+                      setContinuation(null);
+                      setApplicationTarget(null);
                     }}
                   />
                 )}
@@ -1410,7 +1421,7 @@ function CheckoutReturn({ api, enabled, onBilling }) {
   );
 }
 
-function AuthScreen({
+export function AuthScreen({
   config,
   onSession,
   continuation = false,
@@ -1492,16 +1503,16 @@ function AuthScreen({
     }
   }
   return (
-    <div className="auth-layout">
-      <section className="auth-story">
+    <main className="auth-layout">
+      <aside className="auth-story" aria-label="RoleClue introduction">
         <Brand light />
         <div>
           <p className="eyebrow mint-text">LESS SEARCHING. MORE DIRECTION.</p>
-          <h1>
+          <p className="auth-story-heading">
             A focused shortlist.
             <br />
             <em>A clearer next move.</em>
-          </h1>
+          </p>
           <p>
             Find technology roles that fit your experience and your situation.
             Understand the match before you put yourself forward.
@@ -1521,8 +1532,8 @@ function AuthScreen({
         <span className="auth-story-footer">
           Built for Australian technology careers.
         </span>
-      </section>
-      <section className="auth-form-wrap">
+      </aside>
+      <section className="auth-form-wrap" aria-labelledby="auth-title">
         <div className="auth-mobile-brand">
           <Brand />
         </div>
@@ -1533,7 +1544,7 @@ function AuthScreen({
             </button>
           )}
           <p className="eyebrow">YOUR ROLECLUE WORKSPACE</p>
-          <h1>
+          <h1 id="auth-title">
             {continuation && ["signin", "signup"].includes(mode)
               ? "Save this match."
               : titles[mode]}
@@ -1755,7 +1766,7 @@ function AuthScreen({
           </nav>
         </div>
       </section>
-    </div>
+    </main>
   );
 }
 
@@ -2386,7 +2397,7 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
   );
 }
 
-function OpportunitiesScreen({
+export function OpportunitiesScreen({
   api,
   profile,
   onNotice,
@@ -2592,6 +2603,7 @@ function OpportunitiesScreen({
         <div className="tabs" aria-label="Opportunity view">
           <button
             className={cx(view === "selected" && "active")}
+            aria-pressed={view === "selected"}
             onClick={() => setView("selected")}
           >
             Selected for you
@@ -2599,6 +2611,7 @@ function OpportunitiesScreen({
           </button>
           <button
             className={cx(view === "ignored" && "active")}
+            aria-pressed={view === "ignored"}
             onClick={() => setView("ignored")}
           >
             Ignored
@@ -3399,7 +3412,7 @@ function ApplicationsScreen({
   );
 }
 
-function ApplicationWorkspace({
+export function ApplicationWorkspace({
   application,
   api,
   billing,
@@ -3452,13 +3465,7 @@ function ApplicationWorkspace({
     } else if (value.status === "failed") {
       sessionStorage.removeItem(generationKey);
       setBusy("");
-      setError(
-        new Error(
-          value.error?.message ||
-            value.message ||
-            "The letter could not be generated. No generation credit was used. Please try again.",
-        ),
-      );
+      setError(new Error(generationFailureMessage(value)));
     } else if (value.status === "pending") {
       let saved;
       try {
@@ -3693,6 +3700,7 @@ function ApplicationWorkspace({
       <div className="tabs application-tabs">
         <button
           className={cx(tab === "letter" && "active")}
+          aria-pressed={tab === "letter"}
           onClick={() => setTab("letter")}
         >
           <FileText size={15} />
@@ -3700,6 +3708,7 @@ function ApplicationWorkspace({
         </button>
         <button
           className={cx(tab === "details" && "active")}
+          aria-pressed={tab === "details"}
           onClick={() => setTab("details")}
         >
           Match & notes

@@ -997,16 +997,19 @@ button svg {
   margin: auto 0;
   padding: 65px 0;
 }
-.auth-story h1 {
+.auth-story-heading {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  letter-spacing: -0.055em;
   font-size: clamp(44px, 4.2vw, 65px);
   line-height: 1.12;
   margin: 22px 0;
 }
-.auth-story h1 em {
+.auth-story-heading em {
   color: #9ccdb7;
   font-weight: 400;
 }
-.auth-story > div > p:not(.eyebrow) {
+.auth-story > div > p:not(.eyebrow):not(.auth-story-heading) {
   color: #afc9c0;
   font-size: 14px;
   max-width: 430px;
@@ -1083,7 +1086,7 @@ button svg {
 }
 .field > small {
   font-size: 10px;
-  color: #7b897e;
+  color: var(--muted);
   font-weight: 400;
   line-height: 1.6;
 }
@@ -1113,7 +1116,7 @@ button svg {
 }
 .auth-links p {
   font-size: 11px;
-  color: #74857b;
+  color: #52645a;
   margin-top: 15px;
 }
 .auth-links > button + button {
@@ -1125,14 +1128,14 @@ button svg {
   justify-content: center;
   gap: 6px;
   font-size: 10px;
-  color: #869487;
+  color: #52645a;
   margin: 27px 0 35px;
 }
 .auth-bottom {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  color: #7f8b7d;
+  color: #52645a;
   margin-top: 30px;
 }
 .auth-bottom a {
@@ -2401,7 +2404,7 @@ button svg {
   .data-card {
     align-items: flex-start;
   }
-  .auth-story h1 {
+  .auth-story-heading {
     font-size: 44px;
   }
   .shortlist-intro {
@@ -3865,5 +3868,66 @@ button svg {
   }
   .guest-signin {
     max-width: 130px;
+  }
+}
+
+/* Keep the compact member workspace readable and operable on touch screens. */
+@media (max-width: 600px) {
+  .page-heading .eyebrow,
+  .role-info > small,
+  .fit-info .pill,
+  .app-footer,
+  .step-number,
+  .consent,
+  .upload-zone p,
+  .optional,
+  .chip-field legend > span,
+  .resume-details > p,
+  .onboarding-note,
+  .onboarding-note span,
+  .profile-save > .subtle,
+  .letter-allowance,
+  .letter-allowance > button,
+  .auth-form .eyebrow,
+  .demo-banner,
+  .demo-banner span,
+  .job-meta,
+  .evidence-section li > p,
+  .source-detail .text-link,
+  .undo-banner,
+  .undo-banner > button:not(.icon-button),
+  .plan-gate-main > .subtle {
+    font-size: 12px;
+  }
+
+  .field,
+  .field > small,
+  .check-line,
+  .choice-chip,
+  .chip-field legend,
+  .resume-details summary,
+  .resume-text,
+  .shortlist-footnote,
+  .feed-status,
+  .empty-description,
+  .application-controls .button,
+  .generate-row .button,
+  .dialog-footer .button,
+  .dialog-actions .button,
+  .toast,
+  .gated-account-actions .text-link {
+    font-size: 13px;
+  }
+
+  button,
+  a,
+  summary,
+  .choice-chip {
+    min-height: 44px;
+  }
+
+  .icon-button,
+  button[aria-label] {
+    min-width: 44px;
   }
 }

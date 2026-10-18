@@ -39,6 +39,8 @@ const ROLE_FAMILIES = [
   ["business-analysis", "Business analysis"],
 ];
 
+const GUEST_RESUME_MAX_BYTES = 4 * 1024 * 1024;
+
 const blankSituation = {
   situation: "actively-looking",
   location: "",
@@ -227,7 +229,7 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
         <UploadCloud size={32} />
         <span>
           <strong>{file?.name || "Choose your PDF or DOCX resume"}</strong>
-          <small>Text-based file, up to 5 MB</small>
+          <small>Text-based file, up to 4 MB</small>
         </span>
         <span className="button secondary">{file ? "Choose another" : "Choose file"}</span>
         <input
@@ -574,7 +576,7 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
   async function upload(file, consent) {
     const extension = file?.name?.split(".").pop()?.toLowerCase();
     if (!file || !["pdf", "docx"].includes(extension)) return setError(new Error("Choose a PDF or DOCX resume."));
-    if (!file.size || file.size > 5 * 1024 * 1024) return setError(new Error("Choose a non-empty resume no larger than 5 MB."));
+    if (!file.size || file.size > GUEST_RESUME_MAX_BYTES) return setError(new Error("Choose a non-empty resume no larger than 4 MB."));
     setBusy("upload");
     setError(null);
     try {

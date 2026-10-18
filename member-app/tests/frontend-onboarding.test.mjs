@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  clearAccountBrowserState,
   clearContinuation,
+  completedContinuationApplicationId,
   guestStepFrom,
   profileErrors,
   readContinuation,
   readGuestState,
+  reconcileClaimedContinuation,
+  rememberApplication,
   saveContinuation,
   saveGuestState,
 } from "../src/guest-state.js";
@@ -104,4 +108,79 @@ test("continuation stores opaque identifiers, not resume or job text", () => {
   assert.doesNotMatch(sessionStorage.dump(), /private resume|private job description/);
   clearContinuation();
   assert.equal(readContinuation(), null);
+});
+
+test("a claimed continuation from account A is not trusted after account B loads", () => {
+  const accountA = "application-account-a";
+  const accountB = "application-account-b";
+  saveContinuation({
+    token: "a".repeat(48),
+    jobId: "job-account-a",
+    applicationId: accountA,
+    claimed: true,
+    awaitingAuth: false,
+  });
+  assert.equal(
+    reconcileClaimedContinuation(readContinuation(), {
+      pendingApplicationId: accountA,
+    }).applicationId,
+    accountA,
+  );
+
+  assert.equal(
+    reconcileClaimedContinuation(readContinuation(), null),
+    null,
+  );
+  assert.equal(readContinuation(), null);
+
+  saveContinuation({
+    token: "a".repeat(48),
+    jobId: "job-account-a",
+    applicationId: accountA,
+    claimed: true,
+    awaitingAuth: false,
+  });
+  const reconciled = reconcileClaimedContinuation(readContinuation(), {
+    pendingApplicationId: accountB,
+  });
+  assert.equal(reconciled.applicationId, accountB);
+  assert.equal(readContinuation().applicationId, accountB);
+  assert.notEqual(readContinuation().applicationId, accountA);
+});
+
+test("continuation completion uses only the server-confirmed application", () => {
+  assert.equal(
+    completedContinuationApplicationId({
+      completed: true,
+      continuation: null,
+    }),
+    null,
+  );
+  assert.equal(
+    completedContinuationApplicationId({
+      completed: true,
+      applicationId: "server-application",
+    }),
+    "server-application",
+  );
+});
+
+test("account browser cleanup removes bearer and continuation state but can preserve an intentional guest return", () => {
+  const token = "g".repeat(48);
+  const seed = () => {
+    saveGuestState({ token, expiresAt: new Date(Date.now() + 60_000).toISOString(), step: "matches" });
+    saveContinuation({ token, jobId: "freehire:job-1", applicationId: "freehire:job-1", claimed: true });
+    rememberApplication("freehire:job-1");
+  };
+  seed();
+  clearAccountBrowserState();
+  assert.equal(readGuestState(), null);
+  assert.equal(readContinuation(), null);
+  assert.equal(sessionStorage.length, 0);
+
+  seed();
+  clearAccountBrowserState({ preserveGuestState: true });
+  assert.equal(readGuestState().token, token);
+  assert.equal(readContinuation(), null);
+  assert.equal(sessionStorage.length, 1);
 });

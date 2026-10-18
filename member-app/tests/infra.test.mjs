@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appTemplate, artifactTemplate } from '../infra/template.mjs';
+import { apiOriginRequestPolicyId, appTemplate, artifactTemplate } from '../infra/template.mjs';
 
 test('production is authenticated by default, with only bounded guest intake, health and signed Stripe callbacks public', () => {
   const routes = Object.values(appTemplate().Resources).filter(r => r.Type === 'AWS::ApiGatewayV2::Route');
@@ -17,6 +17,7 @@ test('production never defaults to demo, paid models or unapproved feeds', () =>
   assert.equal(template.Parameters.JobFeedLicenseApproved.Default, 'false');
   assert.equal(template.Parameters.FreehireEnabled.Default, 'false');
   assert.equal(template.Parameters.FreehireLicenseApproved.Default, 'false');
+  assert.equal(template.Parameters.ApiOriginGateEnabled.Default, 'false');
   assert.equal(template.Parameters.GoogleSignInEnabled.Default, 'false');
   assert.equal(template.Parameters.StripePriceId.Default, '');
   assert.equal(template.Parameters.StripeStarterPriceId.Default, '');
@@ -38,26 +39,50 @@ test('private records are retained, encrypted and isolated from public-site perm
   const resources = appTemplate().Resources;
   assert.equal(resources.ResumeBucket.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy, true);
   assert.equal(resources.Table.Properties.DeletionProtectionEnabled, true);
-  assert.equal(resources.UserPool.DeletionPolicy, 'Retain');
-  assert.equal(resources.ResumeBucket.DeletionPolicy, 'Retain');
+  for (const name of ['Table', 'UserPool', 'SiteBucket', 'ResumeBucket']) {
+    assert.equal(resources[name].DeletionPolicy, 'Retain');
+    assert.equal(resources[name].UpdateReplacePolicy, 'Retain');
+  }
   assert.ok(resources.ResumeBucketPolicy.Properties.PolicyDocument.Statement.every(s => s.Effect === 'Deny'));
   assert.equal(artifactTemplate().Resources.Artifacts.Properties.LifecycleConfiguration.Rules[0].ExpirationInDays, 90);
 });
 
-test('daily refresh is timezone-aware and background failures have a bounded queue', () => {
+test('daily refresh is timezone-aware and async work has isolated bounded queues', () => {
   const r = appTemplate().Resources;
   assert.equal(r.DailyRefresh.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
   assert.equal(r.DailyRefresh.Properties.ScheduleExpression, 'cron(0 6 * * ? *)');
+  assert.equal(r.GenerationRepair.Properties.ScheduleExpression, 'rate(5 minutes)');
+  assert.equal(r.GenerationRepair.Properties.Target.Input, JSON.stringify({kind:'generation-repair'}));
+  assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
+  assert.deepEqual(r.GenerationRepair.Properties.Target.RetryPolicy, { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 });
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpression, 'at(2026-11-04T09:00:00)');
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
   assert.equal(r.GenerationQueue.Type, 'AWS::SQS::Queue');
   assert.equal(r.GenerationQueue.Properties.RedrivePolicy.maxReceiveCount, 3);
   assert.equal(r.GenerationQueue.Properties.VisibilityTimeout, 600);
-  assert.equal(r.GenerationQueue.Properties.VisibilityTimeout, 600);
   assert.deepEqual(r.GenerationQueue.Properties.RedrivePolicy.deadLetterTargetArn, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
+  assert.equal(r.GenerationQueue.Properties.SqsManagedSseEnabled, true);
+  assert.equal(r.RecommendationQueue.Type, 'AWS::SQS::Queue');
+  assert.equal(r.RecommendationQueue.Properties.RedrivePolicy.maxReceiveCount, 3);
+  assert.equal(r.RecommendationQueue.Properties.VisibilityTimeout, 600);
+  assert.equal(r.RecommendationQueue.Properties.SqsManagedSseEnabled, true);
+  assert.deepEqual(r.RecommendationQueue.Properties.RedrivePolicy.deadLetterTargetArn, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
   assert.equal(r.GenerationQueueMapping.Properties.BatchSize, 1);
   assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionResponseTypes, ['ReportBatchItemFailures']);
   assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
+  assert.deepEqual(r.GenerationQueueMapping.Properties.ScalingConfig, { MaximumConcurrency: 5 });
+  assert.equal(r.RecommendationQueueMapping.Properties.BatchSize, 1);
+  assert.deepEqual(r.RecommendationQueueMapping.Properties.FunctionResponseTypes, ['ReportBatchItemFailures']);
+  assert.deepEqual(r.RecommendationQueueMapping.Properties.EventSourceArn, { 'Fn::GetAtt': ['RecommendationQueue', 'Arn'] });
+  assert.deepEqual(r.RecommendationQueueMapping.Properties.ScalingConfig, { MaximumConcurrency: 2 });
+  assert.deepEqual(r.FunctionAsyncFailures.Properties, {
+    FunctionName: { Ref: 'Function' },
+    Qualifier: 'live',
+    MaximumEventAgeInSeconds: 3600,
+    MaximumRetryAttempts: 2,
+    DestinationConfig: { OnFailure: { Destination: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } } },
+  });
+  assert.deepEqual(r.FunctionAsyncFailures.DependsOn, ['FunctionAlias']);
   assert.equal(r.FailedWork.Properties.MessageRetentionPeriod, 1209600);
   assert.equal(r.LogGroup.Properties.RetentionInDays, 30);
   assert.equal(r.ApiLogs.Properties.RetentionInDays, 30);
@@ -73,9 +98,17 @@ test('production deployment is immutable and alarms have an operator destination
   assert.equal(r.FunctionAlias.Properties.Name, 'live');
   assert.deepEqual(r.Integration.Properties.IntegrationUri, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
   assert.deepEqual(r.DailyRefresh.Properties.Target.Arn, { 'Fn::GetAtt': ['FunctionAlias', 'Arn'] });
-  for (const name of ['FailedWorkAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'AiAuthorityReviewAlarm']) {
+  for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'AiAuthorityReviewAlarm']) {
     assert.deepEqual(r[name].Properties.AlarmActions, [{ Ref: 'AlarmTopic' }]);
   }
+  assert.equal(r.ReconciliationMetric.Properties.FilterPattern, '"generation_reconciliation_required"');
+  assert.equal(r.GenerationRepairFailureMetric.Properties.FilterPattern, '"generation_dispatch_repair_failed"');
+  assert.equal(r.AiAuthorityReviewMetric.Properties.FilterPattern, '"ai_authority_review_required"');
+  assert.equal(r.GenerationRepairFailureAlarm.Properties.MetricName, 'GenerationDispatchRepairFailed');
+  assert.equal(r.GenerationQueueAgeAlarm.Properties.MetricName, 'ApproximateAgeOfOldestMessage');
+  assert.equal(r.GenerationQueueBacklogAlarm.Properties.MetricName, 'ApproximateNumberOfMessagesVisible');
+  assert.deepEqual(r.GenerationQueueAgeAlarm.Properties.Dimensions, [{ Name: 'QueueName', Value: { 'Fn::GetAtt': ['GenerationQueue', 'QueueName'] } }]);
+  assert.deepEqual(r.RecommendationQueueAgeAlarm.Properties.Dimensions, [{ Name: 'QueueName', Value: { 'Fn::GetAtt': ['RecommendationQueue', 'QueueName'] } }]);
   assert.equal(r.AlarmSubscription.Properties.Protocol, 'email');
 });
 
@@ -86,9 +119,14 @@ test('CloudFront authenticates requests to the public API origin', () => {
     HeaderName: 'X-RoleClue-Origin',
     HeaderValue: { 'Fn::Sub': '{{resolve:secretsmanager:${ApiOriginSecret}:SecretString}}' },
   }]);
-  assert.deepEqual(r.Function.Properties.Environment.Variables.API_ORIGIN_SECRET, { 'Fn::Sub': '{{resolve:secretsmanager:${ApiOriginSecret}:SecretString}}' });
+  assert.deepEqual(r.Function.Properties.Environment.Variables.API_ORIGIN_SECRET, {
+    'Fn::If': ['EnforceApiOriginGate', { 'Fn::Sub': '{{resolve:secretsmanager:${ApiOriginSecret}:SecretString}}' }, ''],
+  });
   assert.equal(r.ApiOriginSecret.Properties.GenerateSecretString.PasswordLength, 64);
   assert.equal(r.ApiOriginSecret.DeletionPolicy, 'Retain');
+  const apiBehavior = r.Distribution.Properties.DistributionConfig.CacheBehaviors.find(behavior => behavior.PathPattern === '/api/*');
+  assert.equal(apiOriginRequestPolicyId,'b689b0a8-53d0-40ab-baf2-68738e2966ac');
+  assert.equal(apiBehavior.OriginRequestPolicyId,apiOriginRequestPolicyId);
 });
 
 test('runtime can authorize transactional condition checks and expires raw resume uploads', () => {
@@ -99,9 +137,13 @@ test('runtime can authorize transactional condition checks and expires raw resum
   assert.deepEqual(data.Resource, { 'Fn::GetAtt': ['Table', 'Arn'] });
   const parameters=statements.find(s=>s.Action.includes('ssm:GetParameter')).Resource;
   assert.ok(parameters.some(value=>value['Fn::Sub']==='arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GuestRateHashSecretParam}'));
-  const queue=statements.find(s=>s.Action.includes('sqs:SendMessage'));
+  const queue=statements.find(s=>s.Action.includes('sqs:ReceiveMessage'));
   assert.ok(queue.Action.includes('sqs:ReceiveMessage'));
-  assert.deepEqual(queue.Resource, { 'Fn::GetAtt': ['GenerationQueue', 'Arn'] });
+  assert.deepEqual(queue.Resource, [{ 'Fn::GetAtt': ['GenerationQueue', 'Arn'] }, { 'Fn::GetAtt': ['RecommendationQueue', 'Arn'] }]);
+  const asyncFailure=statements.find(s=>s.Action.length===1&&s.Action[0]==='sqs:SendMessage');
+  assert.deepEqual(asyncFailure.Resource, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
+  assert.deepEqual(r.Function.Properties.Environment.Variables.RECOMMENDATION_QUEUE_URL, { Ref: 'RecommendationQueue' });
+  assert.deepEqual(appTemplate().Outputs.RecommendationQueueUrl.Value, { Ref: 'RecommendationQueue' });
   assert.equal(r.Table.Properties.TimeToLiveSpecification.AttributeName, 'ttl');
   const rules = r.ResumeBucket.Properties.LifecycleConfiguration.Rules;
   assert.equal(rules.find(x => x.Prefix === 'pending/').ExpirationInDays, 1);

@@ -61,7 +61,10 @@ export function billingPresentation(billing, formatDate) {
 export function billingReturnOutcome(kind, billing, expectedPlan = null) {
   if (kind === "success") {
     if (expectedPlan === "starter") {
-      return billing?.starterEverPaid === true || billing?.starterPurchased === true
+      return billing?.plan === "starter" &&
+        billing?.status === "active" &&
+        billing?.canGenerate === true &&
+        Number(billing?.remaining) > 0
         ? "verified"
         : "waiting";
     }
