@@ -34,6 +34,9 @@ test('production never defaults to demo, paid models or unapproved feeds', () =>
   assert.match(template.Resources.GoogleIdentityProvider.Properties.ProviderDetails.client_secret['Fn::Sub'], /ssm-secure/);
   assert.equal(template.Resources.Function.Properties.ReservedConcurrentExecutions, undefined);
   assert.equal(template.Resources.Stage.Properties.DefaultRouteSettings.ThrottlingRateLimit, 5);
+  assert.deepEqual(template.Resources.Stage.Properties.AccessLogSettings.DestinationArn, {
+    'Fn::Sub': 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogs}',
+  });
 });
 
 test('private records are retained, encrypted and isolated from public-site permissions', () => {
