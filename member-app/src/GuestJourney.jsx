@@ -22,6 +22,7 @@ import {
   guestStepFrom,
   profileErrors,
   readGuestState,
+  reviewAcknowledgements,
   saveContinuation,
   saveGuestState,
 } from "./guest-state.js";
@@ -294,8 +295,9 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
 
 function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
   const [draft, setDraft] = useState(initial);
-  const [reviewed, setReviewed] = useState(false);
-  const [terms, setTerms] = useState(false);
+  const acknowledgements = reviewAcknowledgements(initial);
+  const [reviewed, setReviewed] = useState(acknowledgements.reviewed);
+  const [terms, setTerms] = useState(acknowledgements.termsAccepted);
   const [showOptional, setShowOptional] = useState(false);
   const set = (key, value) => {
     setDraft((current) => ({ ...current, [key]: value }));

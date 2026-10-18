@@ -171,6 +171,15 @@ export function profileErrors(profile) {
   return errors;
 }
 
+export function reviewAcknowledgements(profile) {
+  return {
+    reviewed: profile?.confirmed === true,
+    termsAccepted:
+      typeof profile?.termsAcceptedAt === "string" &&
+      Number.isFinite(Date.parse(profile.termsAcceptedAt)),
+  };
+}
+
 export function guestStepFrom(bundle) {
   if (Array.isArray(bundle?.opportunities)) return "matches";
   if (bundle?.profile?.confirmed) return "searching";

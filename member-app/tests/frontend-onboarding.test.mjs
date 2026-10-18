@@ -10,6 +10,7 @@ import {
   readGuestState,
   reconcileClaimedContinuation,
   rememberApplication,
+  reviewAcknowledgements,
   saveContinuation,
   saveGuestState,
 } from "../src/guest-state.js";
@@ -77,6 +78,22 @@ test("profile validation requires essential eligibility answers only", () => {
   assert.match(
     profileErrors({ ...profile, roleFamilies: [] })[0],
     /target role/i,
+  );
+});
+
+test("a confirmed guest profile keeps its acknowledgements after a search retry", () => {
+  const acceptedAt = new Date().toISOString();
+  assert.deepEqual(
+    reviewAcknowledgements({ confirmed: true, termsAcceptedAt: acceptedAt }),
+    { reviewed: true, termsAccepted: true },
+  );
+  assert.deepEqual(reviewAcknowledgements({ confirmed: false }), {
+    reviewed: false,
+    termsAccepted: false,
+  });
+  assert.deepEqual(
+    reviewAcknowledgements({ confirmed: true, termsAcceptedAt: "invalid" }),
+    { reviewed: true, termsAccepted: false },
   );
 });
 
