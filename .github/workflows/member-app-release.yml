@@ -1,0 +1,58 @@
+name: RoleClue member app
+
+on:
+  pull_request:
+    paths:
+      - 'member-app/**'
+      - '.github/workflows/member-app-release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'member-app/**'
+      - '.github/workflows/member-app-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roleclue-member-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: member-app
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: member-app/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Build all production artifacts
+        env:
+          ROLECLUE_COGNITO_CLIENT_ID: syntheticci1234567890client
+          ROLECLUE_RECOMMENDATIONS_ENABLED: 'true'
+          ROLECLUE_GUEST_DISCOVERY_ENABLED: 'true'
+          ROLECLUE_COVER_LETTERS_ENABLED: 'true'
+          ROLECLUE_BILLING_ENABLED: 'true'
+        run: npm run release:prepare
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: roleclue-member-check-${{ github.sha }}
+          path: |
+            member-app/build/app.template.json
+            member-app/build/lambda.zip
+            member-app/build/lambda.sha256
+            member-app/build/site.zip
+            member-app/dist/
+          if-no-files-found: error
+          retention-days: 14

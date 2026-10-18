@@ -1,0 +1,12 @@
+flowchart LR
+  A[Generate] --> B[Consent, listing and allowance checks]
+  B --> C{Idempotency key exists?}
+  C -->|yes| D[Return existing GEN]
+  C -->|no| E[Reserve allowance and create GEN]
+  E --> F[Async Lambda]
+  F --> G[Reserve AI budget]
+  G --> H[OpenAI]
+  H --> I[Reconcile cost]
+  I --> J{Usable result?}
+  J -->|yes| K[Store LETTER and consume credit]
+  J -->|no| L[Restore product allowance]

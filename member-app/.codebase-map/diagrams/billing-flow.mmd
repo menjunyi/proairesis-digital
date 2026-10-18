@@ -1,0 +1,10 @@
+flowchart LR
+  A[Plan and terms] --> B[Checkout lock]
+  B --> C[Stripe reconcile]
+  C --> D[Fixed A$1 or A$20 price]
+  D --> E[Checkout Session]
+  E --> F[Signed webhook or refresh]
+  F --> G[Canonical Stripe lookup]
+  G --> H[ENTITLEMENT]
+  H --> I[Starter: 2 letters]
+  H --> J[Plus: 50 per paid period]

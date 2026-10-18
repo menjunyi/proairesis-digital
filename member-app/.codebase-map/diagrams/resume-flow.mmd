@@ -1,0 +1,8 @@
+flowchart LR
+  A[Choose PDF or DOCX] --> B[Request upload grant]
+  B --> C[Direct bounded S3 PUT]
+  C --> D[Finalize]
+  D --> E[Validate bytes and archive]
+  E --> F[Extract text and suggestions]
+  F --> G[User review]
+  G --> H[Confirmed PROFILE]

@@ -1,0 +1,53 @@
+{
+  "name": "roleclue-member-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "overrides": {
+    "mammoth": {
+      "argparse": "2.0.1"
+    }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3002",
+    "dev:api": "ROLECLUE_LOCAL_DEMO=1 node server/local.mjs",
+    "build": "vite build",
+    "build:lambda": "node scripts/build-lambda.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 3002",
+    "infra:template": "node infra/template.mjs",
+    "check": "npm test && npm run build && npm run build:lambda && npm run infra:template",
+    "release:secrets": "node scripts/ensure-runtime-secrets.mjs",
+    "release:ai-policy": "node scripts/roleclue-ai-policy.mjs",
+    "release:prepare": "npm run build:lambda && npm run infra:template && node scripts/prepare-release.mjs",
+    "release:plan": "node scripts/deploy-production.mjs --plan",
+    "release:deploy": "node scripts/deploy-production.mjs --execute-existing",
+    "release:rollback": "node scripts/rollback-production.mjs",
+    "smoke:cloud": "node scripts/smoke-cloud.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1149.0",
+    "@aws-sdk/client-dynamodb": "^3.1149.0",
+    "@aws-sdk/client-lambda": "^3.1149.0",
+    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/client-sqs": "^3.1152.0",
+    "@aws-sdk/client-ssm": "^3.1149.0",
+    "@aws-sdk/lib-dynamodb": "^3.1149.0",
+    "@aws-sdk/s3-request-presigner": "^3.1149.0",
+    "lucide-react": "^1.55.0",
+    "mammoth": "^1.13.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "stripe": "^23.0.0",
+    "unpdf": "^1.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "esbuild": "^0.28.2",
+    "vite": "^8.3.4"
+  }
+}

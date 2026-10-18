@@ -1,0 +1,16 @@
+flowchart LR
+  U[Job seeker] --> CF[CloudFront]
+  CF --> SPA[Private S3 SPA]
+  CF --> API[API Gateway HTTP API]
+  U --> AUTH[Cognito and Google PKCE]
+  AUTH --> API
+  API --> L[Node.js 22 Lambda]
+  L --> D[(DynamoDB)]
+  L --> R[(Private resume S3)]
+  L --> SSM[SSM SecureString]
+  L --> STRIPE[Stripe]
+  L --> OAI[OpenAI Responses API]
+  L --> JOBS[Freehire and approved ATS feeds]
+  L -. async generation event .-> L
+  L -. failed async event .-> SQS[SQS failure destination]
+  SCH[EventBridge 06:00 Sydney] --> L

@@ -1,0 +1,12 @@
+flowchart LR
+  A[Situation] --> B[Guest session]
+  B --> C[Resume extraction]
+  C --> D[Human confirmation]
+  D --> E[ATS search]
+  E --> F[Rank and show five]
+  F --> G[Interested]
+  G --> H[Sign in]
+  H --> I[Claim transaction]
+  I --> J[Stripe gate]
+  J --> K[Verified entitlement]
+  K --> L[Selected application]

@@ -1,0 +1,13 @@
+flowchart TD
+  U[USER# sub] --> P[PROFILE]
+  U --> E[ENTITLEMENT]
+  U --> A[APP#]
+  U --> L[LETTER#]
+  U --> G[GEN#]
+  U --> D[DECISION#]
+  U --> I[IMPORTED_JOB#]
+  GS[GUEST# token hash] --> SS[SESSION]
+  GS --> J[JOB#]
+  F[FEED#catalog] --> FS[FEED#snapshot# id]
+  B[BILLING#customers] --> E
+  AI[SYSTEM#EXTERNAL_AI] --> G

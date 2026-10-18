@@ -1,0 +1,19 @@
+# Frontend page and function map
+
+| Page | Component | Main functions | Calls | Result | Evidence |
+|---|---|---|---|---|---|
+| Guest: situation | `SituationStep` | `start()` | POST /api/guest/start | Creates the 24-hour guest session and advances to resume upload. | `src/GuestJourney.jsx:157-205, 642`; `557-572` |
+| Guest: resume | `ResumeStep` | `upload(); fileToBase64()` | POST /api/guest/resume | Extracts text and suggestions, then advances to profile review. | `src/GuestJourney.jsx:208-257, 643`; `574-592; src/api.js:315-348` |
+| Guest: profile confirmation | `ReviewStep` | `confirm(); profileErrors()` | POST /api/guest/profile; POST /api/guest/search | Captures explicit work rights, sponsorship and limitations before search. | `src/GuestJourney.jsx:260-393, 644`; `594-613; src/guest-state.js:95-120` |
+| Guest: five matches | `MatchesStep` | `ignore(); interested()` | POST /api/guest/ignore; claim is deferred until sign-in | Shows five current high-fit roles and stores only opaque continuation identifiers. | `src/GuestJourney.jsx:414-503, 646`; `615-631` |
+| Authentication | `AuthScreen` | `submit(); startHostedSignIn(); completeHostedSignIn()` | Amazon Cognito direct auth or Google PKCE | Creates a verified session, then resumes the pending guest claim. | `src/App.jsx:1374-1723; selected at 627-644`; `1405-1454; src/auth.js:148-237` |
+| Post-interest payment gate | `PlanGate` | `checkout(); verifyAgain()` | POST /api/billing/checkout; POST /api/billing/refresh | Keeps the application locked until Stripe-backed entitlement is confirmed. | `src/App.jsx:1119-1291; selected at 772-834`; `1195-1227` |
+| Profile | `ProfileScreen` | `upload(); save()` | POST /api/resume/upload; POST /api/resume/finalize; PUT /api/profile | Merges extracted resume evidence, then stores the user-confirmed profile. | `src/App.jsx:1725-2352; selected at 1017-1024`; `1773-1830` |
+| Opportunities | `OpportunitiesScreen` | `load(); decision()` | GET /api/opportunities or /api/ignored; POST decision | Loads the authoritative ranked queue and reloads it after each decision. | `src/App.jsx:2354-2733; selected at 1026-1038`; `2381-2447` |
+| Add opportunity | `ImportOpportunityDialog` | `submit()` | POST /api/opportunities/import | Validates and ranks a pasted Australian technology listing. | `src/App.jsx:2735-2991`; `2758-2776` |
+| Opportunity details | `OpportunityDialog + MatchEvidence` | `Parent decision()` | POST /api/opportunities/{id}/decision | Explains matches, gaps and confirmation needs before the decision. | `src/App.jsx:3035-3179`; `2412-2447` |
+| Applications | `ApplicationsScreen` | `load(); loadAllApplications()` | GET /api/applications with cursors | Assembles every byte-bounded application and letter page. | `src/App.jsx:3181-3324; selected at 1039-1055`; `3195-3217; src/api.js:122-162` |
+| Application workspace | `ApplicationWorkspace` | `generate(); save(); saveLetter(); poll()` | POST letters; GET generation; PATCH application; PATCH letter | Manages status, notes, idempotent generation, editing, copy and download. | `src/App.jsx:3326-3848`; `3399-3554` |
+| Upgrade dialog | `UpgradeDialog` | `checkout(); portal()` | POST /api/billing/checkout; POST /api/billing/portal | Offers A$1 Starter or A$20 monthly Plus based on server entitlement. | `src/App.jsx:3850-4077`; `3872-3913` |
+| Checkout return | `CheckoutReturn` | `refreshBillingStatus()` | POST /api/billing/refresh | Uses the URL only to trigger server verification and never grants access locally. | `src/App.jsx:1293-1372; mounted at 1000-1010`; `1306-1326; src/api.js:6-32` |
+| Account and plan | `AccountScreen` | `portal(); refreshBilling(); exportData(); deleteAccount()` | Billing portal/refresh; GET /api/export; DELETE /api/account | Shows allowance and provides billing, export and deletion controls. | `src/App.jsx:4079-4399; selected at 1056-1079`; `4094-4175` |
