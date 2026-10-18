@@ -52,9 +52,18 @@ export async function prepareRelease() {
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const appDirectory = resolve(scriptDirectory, '..');
   const repository = execFileSync('git', ['rev-parse', '--show-toplevel'], {cwd: appDirectory, encoding: 'utf8'}).trim();
-  const sourceRevision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repository, encoding: 'utf8'}).trim();
+  const localRevision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repository, encoding: 'utf8'}).trim();
+  const sourceRevision = execFileSync('git', ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], {
+    cwd: repository, encoding: 'utf8', env: {...process.env, GIT_TERMINAL_PROMPT: '0'},
+  }).trim().split(/\s+/)[0];
   const dirty = execFileSync('git', ['status', '--porcelain', '--', ...releasePathspecs], {cwd: repository, encoding: 'utf8'}).trim();
-  if (!/^[a-f0-9]{40}$/.test(sourceRevision) || dirty) throw new Error('Commit the complete member-app release source before preparing a production release.');
+  if (!/^[a-f0-9]{40}$/.test(localRevision) || !/^[a-f0-9]{40}$/.test(sourceRevision) || dirty) throw new Error('Commit the complete member-app release source before preparing a production release.');
+  try {
+    execFileSync('git', ['cat-file', '-e', `${sourceRevision}^{commit}`], {cwd: repository, stdio: 'ignore'});
+    execFileSync('git', ['diff', '--quiet', sourceRevision, localRevision, '--', ...releasePathspecs], {cwd: repository, stdio: 'ignore'});
+  } catch {
+    throw new Error('Fetch origin/main and make the complete release source match that published revision before preparing a release.');
+  }
   if (!execFileSync('git', ['ls-files', ':/member-app/server/handler.mjs'], {cwd: repository, encoding: 'utf8'}).trim()) throw new Error('The member app is not tracked in source control.');
   execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
   const configJson = JSON.stringify(config);

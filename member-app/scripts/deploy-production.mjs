@@ -76,10 +76,16 @@ const manifest = JSON.parse(await readFile(resolve('dist/release.json'), 'utf8')
 requireValue(/^[a-f0-9]{64}$/.test(manifest.releaseId || ''), 'Prepare a release with a valid release ID first.');
 requireValue(/^[a-f0-9]{40}$/.test(manifest.sourceRevision || ''), 'The release manifest has no source revision.');
 const repository = git(['rev-parse', '--show-toplevel']);
-requireValue(git(['rev-parse', 'HEAD'], repository) === manifest.sourceRevision, 'The release manifest does not match the current source revision.');
+const localRevision = git(['rev-parse', 'HEAD'], repository);
 requireValue(!git(['status', '--porcelain', '--', ...releasePathspecs], repository), 'Commit the member-app release source before deployment.');
 const remoteMain = git(['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], repository).split(/\s+/)[0];
 requireValue(remoteMain === manifest.sourceRevision, 'Deploy only the exact revision currently published on origin/main.');
+try {
+  git(['cat-file', '-e', `${manifest.sourceRevision}^{commit}`], repository);
+  execFileSync('git', ['diff', '--quiet', manifest.sourceRevision, localRevision, '--', ...releasePathspecs], {cwd: repository, stdio: 'ignore', timeout: 30_000});
+} catch {
+  throw new Error('The local release source does not match the published manifest revision.');
+}
 if (process.env.GITHUB_ACTIONS === 'true') {
   requireValue(process.env.GITHUB_REF === 'refs/heads/main' && process.env.GITHUB_SHA === manifest.sourceRevision,
     'The production workflow must run from the exact main-branch release revision.');
