@@ -3,33 +3,31 @@ import {randomBytes, randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CognitoIdentityProviderClient, DescribeUserPoolCommand, AdminCreateUserCommand, AdminGetUserCommand, AdminSetUserPasswordCommand} from '@aws-sdk/client-cognito-identity-provider';
-import {stripePortalConfigurationId} from '../infra/template.mjs';
+import {InvokeCommand, LambdaClient} from '@aws-sdk/client-lambda';
+import {aiAuthorityReviewMessage, stripePortalConfigurationId} from '../infra/template.mjs';
+import {HEARTBEAT_BOOTSTRAPS, alarmsOutsideOk, heartbeatBootstrapPlan, resolveAlarmNames, verifyAlarmContracts, verifyHeartbeatInvocation, waitForAlarmsOk} from './smoke-alarms.mjs';
 import {verifyLiveRelease, writeSmokeEvidence} from './smoke-evidence.mjs';
 
 // Deliberately not part of npm test or deployment. It creates exactly two
 // synthetic, suppressed-email identities, then deletes both via the app API.
 // Usage (only after reviewing the target deployment):
-// ROLECLUE_RUN_CLOUD_SMOKE=1 node scripts/smoke-cloud.mjs
+// ROLECLUE_RUN_CLOUD_SMOKE=1 ROLECLUE_EXPECTED_SOURCE_REVISION=<40-hex>
+// node scripts/smoke-cloud.mjs
 // Optional AWS_PROFILE (default proairesis-management), ROLECLUE_STACK_NAME
 // (default roleclue-member-app), ROLECLUE_TEST_SIGNED_UPLOAD=1 (adds an HTTP/S3
 // CORS check and waits up to seven minutes for its grant before cleanup), or
 // API checks always use the public same-origin CloudFront path. Direct API
 // Gateway access is intentionally rejected in production.
 // This script never reads SSM secrets, sends email, creates a checkout, or
-// invokes an AI provider. Signed-upload checks are not browser acceptance.
+// invokes an AI provider. If a fresh heartbeat alarm is not OK, the separate
+// ROLECLUE_BOOTSTRAP_HEARTBEATS=1 opt-in runs the affected live daily job; that
+// can refresh the shared job catalog and enqueue registered-user work.
+// Signed-upload checks are not browser acceptance.
 const ACCOUNT = '037169690315';
 const REGION = 'ap-southeast-2';
-const ALARM_LOGICAL_IDS = [
-  'FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm',
-  'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm',
-  'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm',
-  'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm',
-  'AiAuthorityReviewAlarm', 'DailyRefreshHeartbeatAlarm', 'BillingReconciliationHeartbeatAlarm', 'GenerationRepairHeartbeatAlarm',
-];
 const METRIC_FILTERS = [
   ['"generation_reconciliation_required"', 'GenerationReconciliationRequired'],
   ['"generation_dispatch_repair_failed"', 'GenerationDispatchRepairFailed'],
-  ['"ai_authority_review_required"', 'AiAuthorityReviewRequired'],
   ['"daily_refresh_completed"', 'DailyRefreshCompleted'],
   ['"daily_billing_reconciliation_completed"', 'DailyBillingReconciliationCompleted'],
   ['"generation_repair_completed"', 'GenerationRepairCompleted'],
@@ -49,6 +47,7 @@ function report(check, result = 'passed') {
 // is used, and every AWS call resolves the explicitly selected profile.
 function createAws(profile) {
   const cognito = new CognitoIdentityProviderClient({region: REGION, maxAttempts: 2});
+  const lambda = new LambdaClient({region: REGION, maxAttempts: 2});
   const cognitoCommands = {
     'describe-user-pool': DescribeUserPoolCommand,
     'admin-create-user': AdminCreateUserCommand,
@@ -72,6 +71,13 @@ function createAws(profile) {
         const error = new SmokeCheckError(`AWS ${service} ${operation} failed`);
         if (cause.name === 'UserNotFoundException') error.code = 'UserNotFoundException';
         throw error;
+      }
+    }
+    if (service === 'lambda' && operation === 'invoke') {
+      try {
+        return await lambda.send(new InvokeCommand(input), {abortSignal: AbortSignal.timeout(45000)});
+      } catch {
+        throw new SmokeCheckError('AWS lambda invoke failed');
       }
     }
     requireCheck(cliReads.has(`${service}:${operation}`), 'CLI smoke operation is not an allowlisted read');
@@ -165,6 +171,8 @@ export async function runCloudSmoke(env = process.env) {
   if (profile) process.env.AWS_PROFILE = profile;
   const stackName = env.ROLECLUE_STACK_NAME || 'roleclue-member-app';
   requireCheck(/^roleclue-member-app(?:-[a-z0-9-]+)?$/.test(stackName), 'Only the RoleClue member-app stack is in scope');
+  const expectedSourceRevision=String(env.ROLECLUE_EXPECTED_SOURCE_REVISION??'').trim();
+  requireCheck(/^[a-f0-9]{40}$/.test(expectedSourceRevision), 'Set ROLECLUE_EXPECTED_SOURCE_REVISION to the exact deployed Git revision');
   const aws = createAws(profile);
   const caller = await aws('sts', 'get-caller-identity');
   requireCheck(caller.Account === ACCOUNT, 'AWS account mismatch; nothing was changed');
@@ -185,7 +193,8 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(typeof outputs.DistributionDomain === 'string' && /^[a-z0-9]+\.cloudfront\.net$/.test(outputs.DistributionDomain),
     'CloudFront distribution output is missing or invalid');
   const requestBase = new URL(outputs.SiteUrl);
-  const liveRelease = await verifyLiveRelease({aws, outputs, siteUrl: outputs.SiteUrl, check: requireCheck});
+  const expectedReleaseId=stack.Parameters?.find(item=>item.ParameterKey==='ReleaseId')?.ParameterValue;
+  const liveRelease = await verifyLiveRelease({aws, outputs, siteUrl: outputs.SiteUrl, expectedReleaseId, expectedSourceRevision, check: requireCheck});
   const functionConfig = liveRelease.configuration;
   requireCheck(functionConfig.FunctionArn?.startsWith(`arn:aws:lambda:${REGION}:${ACCOUNT}:function:`), 'Lambda account mismatch');
   const variables = functionConfig.Environment?.Variables ?? {};
@@ -218,41 +227,83 @@ export async function runCloudSmoke(env = process.env) {
     [outputs.DailyRefreshScheduleName, 'feed-refresh'],
     [outputs.GenerationRepairScheduleName, 'generation-repair'],
     [outputs.BillingReconciliationScheduleName, 'billing-reconciliation'],
-    [outputs.AiAuthorityReviewScheduleName, 'ai-authority-review'],
   ];
+  let scheduleRoleArn;
   for (const [name,kind] of schedules) {
     const schedule=await aws('scheduler','get-schedule',{Name:name});
     let input;
     try {input=JSON.parse(schedule.Target?.Input??'');} catch {input=null;}
     requireCheck(schedule.State==='ENABLED'&&schedule.Target?.Arn===outputs.FunctionAliasArn&&input?.kind===kind
-      &&schedule.Target?.DeadLetterConfig?.Arn===outputs.FailedWorkQueueArn,
+      &&schedule.Target?.DeadLetterConfig?.Arn===outputs.FailedWorkQueueArn&&schedule.Target?.RoleArn,
       `The ${kind} schedule is not enabled on the live alias`);
+    scheduleRoleArn??=schedule.Target.RoleArn;
+    requireCheck(schedule.Target.RoleArn===scheduleRoleArn,`The ${kind} schedule uses an unexpected execution role`);
   }
+  const authoritySchedule=await aws('scheduler','get-schedule',{Name:outputs.AiAuthorityReviewScheduleName});
+  const authorityInput=JSON.stringify({event:'roleclue_ai_authority_review',message:aiAuthorityReviewMessage,pricingExpiresAt:'2026-11-11T13:00:00.000Z'});
+  requireCheck(authoritySchedule.State==='ENABLED'&&authoritySchedule.Target?.Arn===outputs.AlarmTopicArn
+    &&authoritySchedule.Target?.Input===authorityInput&&authoritySchedule.Target?.RoleArn===scheduleRoleArn
+    &&authoritySchedule.Target?.DeadLetterConfig?.Arn===outputs.FailedWorkQueueArn
+    &&authoritySchedule.Target?.RetryPolicy?.MaximumRetryAttempts===2
+    &&authoritySchedule.Target?.RetryPolicy?.MaximumEventAgeInSeconds===3600,
+  'The one-time AI authority review is not configured as a direct production alert');
   const stackResources=(await aws('cloudformation','describe-stack-resources',{StackName:stackName})).StackResources??[];
-  const physicalByLogical=new Map(stackResources.map(item=>[item.LogicalResourceId,item.PhysicalResourceId]));
-  const alarmNames=ALARM_LOGICAL_IDS.map(id=>physicalByLogical.get(id));
-  requireCheck(alarmNames.every(Boolean),'One or more production alarm resources are missing');
-  const alarms=(await aws('cloudwatch','describe-alarms',{AlarmNames:alarmNames})).MetricAlarms??[];
-  requireCheck(alarms.length===alarmNames.length,'One or more production alarms could not be read');
-  for (const name of alarmNames) {
-    const alarm=alarms.find(item=>item.AlarmName===name);
-    requireCheck(alarm?.StateValue==='OK'&&alarm.ActionsEnabled===true&&alarm.AlarmActions?.includes(outputs.AlarmTopicArn),
-      `Alarm ${name} does not notify the production alert topic`);
+  const alarmNamesByLogicalId=resolveAlarmNames(stackResources,requireCheck);
+  const alarmNames=[...alarmNamesByLogicalId.values()];
+  const readAlarms=async (names=alarmNames)=>(await aws('cloudwatch','describe-alarms',{AlarmNames:names})).MetricAlarms??[];
+  let alarms=await readAlarms();
+  verifyAlarmContracts({alarms,namesByLogicalId:alarmNamesByLogicalId,alarmTopicArn:outputs.AlarmTopicArn,check:requireCheck});
+  const heartbeatNames=new Set(HEARTBEAT_BOOTSTRAPS.map(item=>alarmNamesByLogicalId.get(item.logicalId)));
+  requireCheck(alarmsOutsideOk(alarms,alarmNames.filter(name=>!heartbeatNames.has(name))).length===0,
+    'A non-heartbeat production alarm is not OK; heartbeat bootstrap was not attempted');
+  const bootstrapPlan=heartbeatBootstrapPlan(alarms,alarmNamesByLogicalId);
+  if (bootstrapPlan.length) {
+    requireCheck(env.ROLECLUE_BOOTSTRAP_HEARTBEATS==='1',
+      'Heartbeat alarms need bootstrap; review the source-pinned release, then set ROLECLUE_BOOTSTRAP_HEARTBEATS=1');
+    for (const {kind} of bootstrapPlan) {
+      const invoked=await aws('lambda','invoke',{FunctionName:outputs.FunctionAliasArn,InvocationType:'RequestResponse',Payload:Buffer.from(JSON.stringify({kind}))});
+      verifyHeartbeatInvocation(invoked,outputs.FunctionVersion,kind,requireCheck);
+    }
+    record('source-pinned heartbeat jobs invoked on the protected live Lambda version');
+    const heartbeatAlarmNames=[...heartbeatNames];
+    const settled=await waitForAlarmsOk({
+      alarmNames:heartbeatAlarmNames,
+      readAlarms:()=>readAlarms(heartbeatAlarmNames),
+      onPoll:({pendingCount})=>report(`waiting for ${pendingCount} heartbeat alarm state updates`,'pending'),
+    });
+    requireCheck(!settled.timedOut,`Heartbeat alarms did not become OK within the bounded wait: ${settled.pending.join(', ')}`);
+    alarms=await readAlarms();
   }
+  requireCheck(alarmsOutsideOk(alarms,alarmNames).length===0,'One or more production alarms are not OK');
   const filters=(await aws('logs','describe-metric-filters',{logGroupName:outputs.LogGroupName,limit:50})).metricFilters??[];
   for (const [pattern,metricName] of METRIC_FILTERS) {
     requireCheck(filters.some(filter=>filter.filterPattern===pattern&&filter.metricTransformations?.some(transform=>
       transform.metricNamespace==='RoleClue'&&transform.metricName===metricName&&transform.metricValue==='1')),
     `Metric filter ${metricName} is missing or invalid`);
   }
-  record('event mappings, daily refresh, billing reconciliation, generation repair, alarms, log metrics and confirmed alert email verified');
+  requireCheck(!filters.some(filter=>filter.metricTransformations?.some(transform=>transform.metricName==='AiAuthorityReviewRequired')),
+    'The retired AI authority-review metric filter still exists');
+  record('event mappings, daily refresh, billing reconciliation, generation repair, alarms, log metrics, direct AI authority notice and confirmed alert email verified');
   record('target account, stack, storage, Cognito and production providers verified');
 
-  const requireEmptyQueues = async () => {
+  const queueStates = async () => {
     const attributes=['ApproximateNumberOfMessages','ApproximateNumberOfMessagesNotVisible','ApproximateNumberOfMessagesDelayed'];
+    const pending=[];
     for (const [label,queueUrl] of [['generation queue',outputs.GenerationQueueUrl],['recommendation queue',outputs.RecommendationQueueUrl],['shared dead-letter queue',outputs.FailedWorkQueueUrl]]) {
       const state=await aws('sqs','get-queue-attributes',{QueueUrl:queueUrl,AttributeNames:attributes});
-      requireCheck(attributes.every(name=>Number(state.Attributes?.[name])===0),`${label} is not empty at release acceptance`);
+      requireCheck(attributes.every(name=>Number.isSafeInteger(Number(state.Attributes?.[name]))),`${label} returned invalid queue attributes`);
+      if (!attributes.every(name=>Number(state.Attributes?.[name])===0)) pending.push(label);
+    }
+    return pending;
+  };
+  const waitForEmptyQueues = async () => {
+    const deadline=Date.now()+8*60*1000;
+    while (true) {
+      const pending=await queueStates();
+      if (!pending.length) return;
+      requireCheck(Date.now()<deadline,`Queues did not drain within the bounded wait: ${pending.join(', ')}`);
+      report(`waiting for ${pending.length} production queues to drain`,'pending');
+      await new Promise(resolveWait=>setTimeout(resolveWait,15000));
     }
   };
 
@@ -502,7 +553,7 @@ export async function runCloudSmoke(env = process.env) {
   }
   if (testError) throw testError;
   if (cleanupError) throw cleanupError;
-  await requireEmptyQueues();
+  await waitForEmptyQueues();
   record('generation, recommendation and shared dead-letter queues are empty');
   record('cloud acceptance complete; all synthetic user data removed, only non-PII deletion hashes retained');
   const evidencePath=await writeSmokeEvidence('cloud-smoke',{

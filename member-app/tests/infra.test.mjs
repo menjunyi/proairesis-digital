@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiOriginRequestPolicyId, appTemplate, artifactTemplate, stripePortalConfigurationId } from '../infra/template.mjs';
+import { aiAuthorityReviewMessage, apiOriginRequestPolicyId, appTemplate, artifactTemplate, stripePortalConfigurationId } from '../infra/template.mjs';
 
 test('production is authenticated by default, with only bounded guest intake, health and signed Stripe callbacks public', () => {
   const routes = Object.values(appTemplate().Resources).filter(r => r.Type === 'AWS::ApiGatewayV2::Route');
@@ -78,6 +78,14 @@ test('daily refresh is timezone-aware and async work has isolated bounded queues
   assert.deepEqual(r.BillingReconciliation.Properties.Target.DeadLetterConfig, { Arn: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } });
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpression, 'at(2026-11-04T09:00:00)');
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
+  assert.deepEqual(r.AiAuthorityReview.Properties.Target.Arn, { Ref: 'AlarmTopic' });
+  assert.equal(r.AiAuthorityReview.Properties.Target.Input, JSON.stringify({
+    event: 'roleclue_ai_authority_review',
+    message: aiAuthorityReviewMessage,
+    pricingExpiresAt: '2026-11-11T13:00:00.000Z',
+  }));
+  assert.deepEqual(r.AiAuthorityReview.Properties.Target.RetryPolicy, { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 });
+  assert.deepEqual(r.AiAuthorityReview.Properties.Target.DeadLetterConfig, { Arn: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } });
   assert.equal(r.GenerationQueue.Type, 'AWS::SQS::Queue');
   assert.equal(r.GenerationQueue.Properties.RedrivePolicy.maxReceiveCount, 3);
   assert.equal(r.GenerationQueue.Properties.VisibilityTimeout, 600);
@@ -124,7 +132,7 @@ test('production deployment is immutable and alarms have an operator destination
   assert.deepEqual(r.DailyRefresh.Properties.Target.Arn, aliasArn);
   assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, aliasArn);
   assert.deepEqual(r.BillingReconciliation.Properties.Target.Arn, aliasArn);
-  assert.deepEqual(r.AiAuthorityReview.Properties.Target.Arn, aliasArn);
+  assert.deepEqual(r.AiAuthorityReview.Properties.Target.Arn, { Ref: 'AlarmTopic' });
   assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, aliasArn);
   assert.deepEqual(r.RecommendationQueueMapping.Properties.FunctionName, aliasArn);
   assert.deepEqual(template.Outputs.FunctionAliasArn.Value, aliasArn);
@@ -142,12 +150,15 @@ test('production deployment is immutable and alarms have an operator destination
   };
   visit(template);
   assert.deepEqual(invalidAliasArnReferences, []);
-  for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'AiAuthorityReviewAlarm', 'DailyRefreshHeartbeatAlarm', 'BillingReconciliationHeartbeatAlarm', 'GenerationRepairHeartbeatAlarm']) {
+  for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'DailyRefreshHeartbeatAlarm', 'BillingReconciliationHeartbeatAlarm', 'GenerationRepairHeartbeatAlarm']) {
     assert.deepEqual(r[name].Properties.AlarmActions, [{ Ref: 'AlarmTopic' }]);
   }
   assert.equal(r.ReconciliationMetric.Properties.FilterPattern, '"generation_reconciliation_required"');
   assert.equal(r.GenerationRepairFailureMetric.Properties.FilterPattern, '"generation_dispatch_repair_failed"');
-  assert.equal(r.AiAuthorityReviewMetric.Properties.FilterPattern, '"ai_authority_review_required"');
+  assert.equal(r.AiAuthorityReviewMetric, undefined);
+  assert.equal(r.AiAuthorityReviewAlarm, undefined);
+  assert.equal(Object.values(r).filter(value => value.Type === 'AWS::CloudWatch::Alarm').length, 14);
+  assert.equal(Object.values(r).filter(value => value.Type === 'AWS::Logs::MetricFilter').length, 5);
   assert.equal(r.GenerationRepairFailureAlarm.Properties.MetricName, 'GenerationDispatchRepairFailed');
   assert.equal(r.DailyRefreshHeartbeatAlarm.Properties.MetricName, 'DailyRefreshCompleted');
   assert.equal(r.DailyRefreshHeartbeatAlarm.Properties.DatapointsToAlarm, 6);
@@ -193,7 +204,15 @@ test('runtime can authorize transactional condition checks and expires raw resum
   const asyncFailure=statements.find(s=>s.Action.length===1&&s.Action[0]==='sqs:SendMessage');
   assert.deepEqual(asyncFailure.Resource, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
   const schedulerStatements=r.ScheduleRole.Properties.Policies[0].PolicyDocument.Statement;
-  assert.deepEqual(schedulerStatements[1],{Effect:'Allow',Action:['sqs:SendMessage'],Resource:{'Fn::GetAtt':['FailedWork','Arn']}});
+  assert.deepEqual(schedulerStatements, [
+    {Effect:'Allow',Action:['lambda:InvokeFunction'],Resource:{Ref:'FunctionAlias'}},
+    {Effect:'Allow',Action:['sns:Publish'],Resource:{Ref:'AlarmTopic'}},
+    {Effect:'Allow',Action:['sqs:SendMessage'],Resource:{'Fn::GetAtt':['FailedWork','Arn']}},
+  ]);
+  assert.deepEqual(r.ScheduleRole.Properties.AssumeRolePolicyDocument.Statement[0].Condition, {StringEquals:{
+    'aws:SourceAccount':{Ref:'AWS::AccountId'},
+    'aws:SourceArn':{'Fn::Sub':'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default'},
+  }});
   assert.deepEqual(r.Function.Properties.Environment.Variables.RECOMMENDATION_QUEUE_URL, { Ref: 'RecommendationQueue' });
   assert.deepEqual(appTemplate().Outputs.RecommendationQueueUrl.Value, { Ref: 'RecommendationQueue' });
   assert.equal(r.Table.Properties.TimeToLiveSpecification.AttributeName, 'ttl');

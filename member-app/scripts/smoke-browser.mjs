@@ -689,11 +689,15 @@ export async function runBrowserSmoke(env = process.env) {
       !api.hash,
     "Unexpected API origin",
   );
+  const expectedReleaseId = stack.Parameters?.find(
+    (item) => item.ParameterKey === "ReleaseId",
+  )?.ParameterValue;
   const liveRelease = await verifyLiveRelease({
     aws,
     outputs,
     siteUrl,
     check,
+    expectedReleaseId,
   });
   const config = liveRelease.configuration;
   check(

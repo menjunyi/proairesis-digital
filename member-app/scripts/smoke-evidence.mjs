@@ -1,9 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const HEX_40 = /^[a-f0-9]{40}$/;
 const HEX_64 = /^[a-f0-9]{64}$/;
+const MANIFEST_KEYS = [
+  "createdAt",
+  "indexSha256",
+  "lambdaSha256",
+  "mode",
+  "releaseId",
+  "siteContentSha256",
+  "sourceRevision",
+  "templateSha256",
+  "version",
+];
 
 function codeSha256Hex(value) {
   if (typeof value !== "string") return "";
@@ -11,19 +22,33 @@ function codeSha256Hex(value) {
   return bytes.length === 32 ? bytes.toString("hex") : "";
 }
 
-async function boundedJson(response, check) {
+async function boundedBody(response, check, maximumBytes, label) {
   const chunks = [];
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.length;
-    check(size <= 64 * 1024, "Release manifest exceeded its size limit");
+    check(size <= maximumBytes, `${label} exceeded its size limit`);
     chunks.push(chunk);
   }
+  return Buffer.concat(chunks);
+}
+
+async function boundedJson(response, check) {
+  const bytes = await boundedBody(response, check, 64 * 1024, "Release manifest");
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(bytes.toString("utf8"));
   } catch {
     check(false, "Release manifest was not valid JSON");
   }
+}
+
+export function canonicalReleaseId(manifest) {
+  return createHash("sha256").update(JSON.stringify({
+    sourceRevision: manifest.sourceRevision,
+    lambdaSha256: manifest.lambdaSha256,
+    siteContentSha256: manifest.siteContentSha256,
+    templateSha256: manifest.templateSha256,
+  })).digest("hex");
 }
 
 export async function verifyLiveRelease({
@@ -31,10 +56,15 @@ export async function verifyLiveRelease({
   outputs,
   siteUrl,
   check,
+  expectedReleaseId,
+  expectedSourceRevision,
   fetchImpl = fetch,
 }) {
-  for (const key of ["FunctionVersion", "FunctionAliasArn"])
+  for (const key of ["FunctionName", "FunctionVersion", "FunctionAliasArn", "SiteArtifactVersion", "SiteArtifactSha256"])
     check(outputs[key], `Stack output ${key} is missing`);
+  check(HEX_64.test(expectedReleaseId ?? ""), "Stack release parameter is invalid");
+  if (expectedSourceRevision !== undefined)
+    check(HEX_40.test(expectedSourceRevision), "Expected source revision is invalid");
   check(/^\d+$/.test(outputs.FunctionVersion), "Stack function version is invalid");
   check(
     outputs.FunctionAliasArn ===
@@ -55,6 +85,10 @@ export async function verifyLiveRelease({
   );
   const manifest = await boundedJson(releaseResponse, check);
   check(manifest?.version === 3, "Deployed release manifest version is invalid");
+  check(
+    Object.keys(manifest).sort().join(",") === MANIFEST_KEYS.slice().sort().join(","),
+    "Deployed release manifest fields are not canonical",
+  );
   check(manifest.mode === "production", "Deployed release is not production");
   check(HEX_64.test(manifest.releaseId ?? ""), "Deployed release ID is invalid");
   check(
@@ -70,6 +104,45 @@ export async function verifyLiveRelease({
   check(
     HEX_64.test(manifest.lambdaSha256 ?? ""),
     "Deployed Lambda artifact hash is invalid",
+  );
+  for (const key of ["indexSha256", "siteContentSha256", "templateSha256"])
+    check(HEX_64.test(manifest[key] ?? ""), `Deployed ${key} is invalid`);
+  check(
+    canonicalReleaseId(manifest) === manifest.releaseId,
+    "Deployed release ID is not the canonical manifest digest",
+  );
+  check(
+    manifest.releaseId === expectedReleaseId,
+    "Deployed release manifest does not match the stack release parameter",
+  );
+  if (expectedSourceRevision !== undefined)
+    check(
+      manifest.sourceRevision === expectedSourceRevision,
+      "Deployed source revision does not match the expected revision",
+    );
+  check(
+    HEX_64.test(outputs.SiteArtifactSha256),
+    "Stack site artifact hash is invalid",
+  );
+  const siteArtifactVersionToken = Buffer.from(outputs.SiteArtifactVersion, "utf8").toString("base64url");
+  check(siteArtifactVersionToken && /^[A-Za-z0-9_-]+$/.test(siteArtifactVersionToken),
+    "Stack site artifact version is invalid");
+
+  const indexResponse = await fetchImpl(`${siteUrl}/index.html`, {
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+    headers: { "Cache-Control": "no-cache" },
+  });
+  check(indexResponse.ok, "Deployed frontend entry point could not be read");
+  check(
+    indexResponse.headers.get("x-amz-cf-id"),
+    "Frontend entry point did not come through CloudFront",
+  );
+  const indexBytes = await boundedBody(indexResponse, check, 2 * 1024 * 1024, "Frontend entry point");
+  check(
+    createHash("sha256").update(indexBytes).digest("hex") === manifest.indexSha256,
+    "Deployed frontend entry point does not match the release manifest",
   );
 
   const alias = await aws("lambda", "get-alias", {
@@ -104,10 +177,10 @@ export async function verifyLiveRelease({
     codeSha256Hex(configuration.CodeSha256) === manifest.lambdaSha256,
     "Live Lambda code does not match the deployed release manifest",
   );
+  const expectedDescription = `RoleClue release ${manifest.releaseId} origin-gate-true ` +
+    `site-v-${siteArtifactVersionToken} site-sha-${outputs.SiteArtifactSha256}`;
   check(
-    typeof configuration.Description === "string" &&
-      configuration.Description.includes(`RoleClue release ${manifest.releaseId}`) &&
-      configuration.Description.includes("origin-gate-true"),
+    configuration.Description === expectedDescription,
     "Live Lambda version is not the protected release described by the manifest",
   );
   return { manifest, alias, configuration };

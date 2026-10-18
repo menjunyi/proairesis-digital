@@ -1,15 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  executeApiProbe,
   executeHealthProbe,
   loadSmokeConfig,
   percentile,
   requirePassingLoad,
-  runHealthLoad,
+  runRepresentativeLoad,
   summarizeLoad,
 } from "../scripts/smoke-load.mjs";
 
 const revision = "a".repeat(40);
+const token = "t".repeat(200);
 
 function configuredEnv(overrides = {}) {
   return {
@@ -19,14 +21,20 @@ function configuredEnv(overrides = {}) {
   };
 }
 
-function success(latencyMs = 100) {
+function success(latencyMs = 100, path = "/api/health") {
   return {
+    path,
     latencyMs,
     status: 200,
     success: true,
     rateLimited: false,
     failureKind: null,
   };
+}
+
+function representativeSuccesses(count, latencyMs = 100) {
+  const paths = ["/api/health", "/api/me", "/api/applications"];
+  return Array.from({ length: count }, (_, index) => success(latencyMs, paths[index % paths.length]));
 }
 
 test("load smoke defaults to 10 requests per second for five minutes with hard bounds", () => {
@@ -95,7 +103,7 @@ test("health probes accept only the production health payload delivered through 
     fetchImpl: async () => new Response(JSON.stringify({ ok: true, mode: "production" }), { status: 200 }),
   });
   assert.equal(notFromCloudFront.success, false);
-  assert.equal(notFromCloudFront.failureKind, "invalid-health");
+  assert.equal(notFromCloudFront.failureKind, "invalid-response");
 
   const throttled = await executeHealthProbe({
     url: new URL("https://app.proairesis.digital/api/health"),
@@ -113,12 +121,46 @@ test("health probes accept only the production health payload delivered through 
   });
   assert.equal(transport.status, null);
   assert.equal(transport.failureKind, "transport");
+
+  const authenticatedCalls = [];
+  const account = await executeApiProbe({
+    url: new URL("https://app.proairesis.digital/api/me"),
+    token,
+    requestTimeoutMs: 5_000,
+    fetchImpl: async (url, options) => {
+      authenticatedCalls.push({ url: String(url), options });
+      return new Response(JSON.stringify({
+        mode: "production",
+        profile: {},
+        billing: {},
+        capabilities: {},
+      }), { status: 200, headers: { "x-amz-cf-id": "request-id" } });
+    },
+  });
+  assert.equal(account.success, true);
+  assert.equal(authenticatedCalls[0].options.headers.Authorization, `Bearer ${token}`);
+
+  const applications = await executeApiProbe({
+    url: new URL("https://app.proairesis.digital/api/applications"),
+    token,
+    requestTimeoutMs: 5_000,
+    fetchImpl: async () => new Response(JSON.stringify({ applications: [], nextCursor: null }), {
+      status: 200,
+      headers: { "x-amz-cf-id": "request-id" },
+    }),
+  });
+  assert.equal(applications.success, true);
+  await assert.rejects(executeApiProbe({
+    url: new URL("https://app.proairesis.digital/api/export"),
+    token,
+    requestTimeoutMs: 5_000,
+  }), /not an approved RoleClue read endpoint/);
 });
 
 test("load summaries enforce strict p95 and combined error plus 429 thresholds", () => {
   assert.equal(percentile([5, 1, 4, 3, 2], 0.95), 5);
-  const passing = summarizeLoad(Array.from({ length: 100 }, () => success(1_999)), {
-    plannedRequests: 100,
+  const passing = summarizeLoad(representativeSuccesses(99, 1_999), {
+    plannedRequests: 99,
   });
   assert.equal(passing.p95Ms, 1_999);
   assert.equal(passing.failureRate, 0);
@@ -126,15 +168,16 @@ test("load summaries enforce strict p95 and combined error plus 429 thresholds",
   assert.doesNotThrow(() => requirePassingLoad(passing));
 
   const latencyBoundary = summarizeLoad([
-    ...Array.from({ length: 94 }, () => success(1_999)),
-    ...Array.from({ length: 6 }, () => success(2_000)),
-  ], { plannedRequests: 100 });
+    ...representativeSuccesses(94, 1_999),
+    ...representativeSuccesses(6, 2_000),
+  ].map((result, index) => ({ ...result, path: ["/api/health", "/api/me", "/api/applications"][index % 3] })), { plannedRequests: 100 });
   assert.equal(latencyBoundary.p95Ms, 2_000);
   assert.equal(latencyBoundary.passed, false);
   assert.throws(() => requirePassingLoad(latencyBoundary), /p95 must be below 2000 ms/);
 
-  const failureBoundaryResults = Array.from({ length: 99 }, () => success(100));
+  const failureBoundaryResults = representativeSuccesses(99, 100);
   failureBoundaryResults.push({
+    path: "/api/health",
     latencyMs: 100,
     status: 429,
     success: false,
@@ -148,7 +191,7 @@ test("load summaries enforce strict p95 and combined error plus 429 thresholds",
   assert.equal(failureBoundary.passed, false);
   assert.throws(() => requirePassingLoad(failureBoundary), /below 1%/);
 
-  const incomplete = summarizeLoad(Array.from({ length: 90 }, () => success(100)), {
+  const incomplete = summarizeLoad(representativeSuccesses(90, 100), {
     plannedRequests: 100,
     circuitBreakerTriggered: true,
   });
@@ -158,7 +201,7 @@ test("load summaries enforce strict p95 and combined error plus 429 thresholds",
   assert.throws(() => requirePassingLoad(incomplete), /did not complete/);
 });
 
-test("the scheduler paces the exact plan and refuses every target except GET health", async () => {
+test("the scheduler paces an exact representative mix of public and authenticated reads", async () => {
   let time = 0;
   const clock = {
     now: () => time,
@@ -170,44 +213,55 @@ test("the scheduler paces the exact plan and refuses every target except GET hea
   const probes = [];
   const config = {
     requestsPerSecond: 2,
-    plannedRequests: 4,
+    plannedRequests: 6,
     requestTimeoutMs: 5_000,
     maximumInFlight: 10,
     circuitBreakerMinimum: 50,
     circuitBreakerFailureRate: 0.1,
   };
-  const summary = await runHealthLoad({
-    url: new URL("https://app.proairesis.digital/api/health"),
+  const summary = await runRepresentativeLoad({
+    siteUrl: new URL("https://app.proairesis.digital"),
+    token,
     config,
     clock,
-    probeImpl: async ({ url }) => {
-      probes.push(String(url));
-      return success(50);
+    probeImpl: async ({ url, token: probeToken }) => {
+      probes.push({ url: String(url), authenticated: Boolean(probeToken) });
+      return success(50, url.pathname);
     },
   });
-  assert.equal(summary.completedRequests, 4);
+  assert.equal(summary.completedRequests, 6);
   assert.equal(summary.passed, true);
-  assert.deepEqual(probes, Array(4).fill("https://app.proairesis.digital/api/health"));
-  assert.equal(time, 1_500);
+  assert.deepEqual(probes, [
+    { url: "https://app.proairesis.digital/api/health", authenticated: false },
+    { url: "https://app.proairesis.digital/api/me", authenticated: true },
+    { url: "https://app.proairesis.digital/api/applications", authenticated: true },
+    { url: "https://app.proairesis.digital/api/health", authenticated: false },
+    { url: "https://app.proairesis.digital/api/me", authenticated: true },
+    { url: "https://app.proairesis.digital/api/applications", authenticated: true },
+  ]);
+  assert.equal(time, 2_500);
 
-  await assert.rejects(runHealthLoad({
-    url: new URL("https://app.proairesis.digital/api/me"),
+  await assert.rejects(runRepresentativeLoad({
+    siteUrl: new URL("https://example.com"),
+    token,
     config,
     clock,
     probeImpl: async () => success(),
-  }), /only the approved RoleClue health endpoint/);
-  await assert.rejects(runHealthLoad({
-    url: new URL("https://app.proairesis.digital/api/health?extra=true"),
+  }), /approved RoleClue production origin/);
+  await assert.rejects(runRepresentativeLoad({
+    siteUrl: new URL("https://app.proairesis.digital/?extra=true"),
+    token,
     config,
     clock,
     probeImpl: async () => success(),
-  }), /only the approved RoleClue health endpoint/);
-  await assert.rejects(runHealthLoad({
-    url: new URL("https://example.com/api/health"),
+  }), /approved RoleClue production origin/);
+  await assert.rejects(runRepresentativeLoad({
+    siteUrl: new URL("https://app.proairesis.digital"),
+    token: "short",
     config,
     clock,
     probeImpl: async () => success(),
-  }), /only the approved RoleClue health endpoint/);
+  }), /in-memory synthetic ID token/);
 });
 
 test("the scheduler opens its circuit after a sustained failure rate", async () => {
@@ -227,11 +281,13 @@ test("the scheduler opens its circuit after a sustained failure rate", async () 
     circuitBreakerMinimum: 5,
     circuitBreakerFailureRate: 0.1,
   };
-  const summary = await runHealthLoad({
-    url: new URL("https://app.proairesis.digital/api/health"),
+  const summary = await runRepresentativeLoad({
+    siteUrl: new URL("https://app.proairesis.digital"),
+    token,
     config,
     clock,
-    probeImpl: async () => ({
+    probeImpl: async ({ url }) => ({
+      path: url.pathname,
       latencyMs: 10,
       status: 503,
       success: false,

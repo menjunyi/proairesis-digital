@@ -1,10 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 import { CognitoIdentityProviderClient, SignUpCommand, ConfirmSignUpCommand, InitiateAuthCommand, AdminGetUserCommand, AdminDeleteUserCommand, ForgotPasswordCommand, ConfirmForgotPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
 import {verifyLiveRelease,writeSmokeEvidence} from './smoke-evidence.mjs';
 
 class SafeError extends Error {}
+export const awsCliOption = key => `--${key.replace(/([a-z0-9])([A-Z])/g,'$1-$2').toLowerCase()}`;
 
 async function main() {
   if (process.env.ROLECLUE_RUN_EMAIL_SMOKE !== '1') throw new SafeError('Explicit email-smoke opt-in is required.');
@@ -29,9 +31,9 @@ async function main() {
   if (out.SiteUrl !== 'https://app.proairesis.digital') throw new SafeError('Unexpected deployment website.');
   const site = new URL(out.SiteUrl);
   if (!out.CognitoClientId || !out.CognitoUserPoolId?.startsWith('ap-southeast-2_')) throw new SafeError('Cognito stack outputs are missing.');
-  const cliKey=key=>key.replace(/[A-Z]/g,letter=>`-${letter.toLowerCase()}`);
-  const releaseAws=(service,operation,input={})=>aws(service,operation,...Object.entries(input).flatMap(([key,value])=>[`--${cliKey(key)}`,String(value)]));
-  const liveRelease=await verifyLiveRelease({aws:releaseAws,outputs:out,siteUrl:out.SiteUrl,check:(condition,message)=>{if(!condition)throw new SafeError(message);}});
+  const releaseAws=(service,operation,input={})=>aws(service,operation,...Object.entries(input).flatMap(([key,value])=>[awsCliOption(key),String(value)]));
+  const expectedReleaseId=stack.Parameters?.find(item=>item.ParameterKey==='ReleaseId')?.ParameterValue;
+  const liveRelease=await verifyLiveRelease({aws:releaseAws,outputs:out,siteUrl:out.SiteUrl,expectedReleaseId,check:(condition,message)=>{if(!condition)throw new SafeError(message);}});
   record('deployed frontend and protected live Lambda release match');
   process.env.AWS_PROFILE = profile;
   const cognito = new CognitoIdentityProviderClient({ region, maxAttempts: 1 });
@@ -202,7 +204,9 @@ async function main() {
   console.log(JSON.stringify({check:'signup-smoke-evidence',passed:true,path:'build/evidence/signup-smoke.json'}));
 }
 
-main().catch(error => {
-  console.error(JSON.stringify({ check: 'email-signup-test', passed: false, message: error instanceof SafeError ? error.message : 'Email signup test failed during AWS preflight.' }));
-  process.exitCode = 1;
-});
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+  main().catch(error => {
+    console.error(JSON.stringify({ check: 'email-signup-test', passed: false, message: error instanceof SafeError ? error.message : 'Email signup test failed during AWS preflight.' }));
+    process.exitCode = 1;
+  });
+}
