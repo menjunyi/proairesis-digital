@@ -479,6 +479,7 @@ export async function createBilling(env,dependencies={}){
   },
   async portal(user,store){
     const e=(await store.get(`USER#${user.sub}`,'ENTITLEMENT'))?.value;if(!e?.customerId)throw new HttpError(404,'NOT_FOUND','No billing account is available.');
+    if(typeof e.customerId!=='string'||!/^cus_[A-Za-z0-9]+$/.test(e.customerId)||(await store.get('BILLING#customers',e.customerId))?.value?.userSub!==user.sub)throw unavailable('Billing ownership could not be verified.');
     const s=await stripe(),configuration=await s.billingPortal.configurations.retrieve(env.STRIPE_PORTAL_CONFIGURATION_ID);
     if(!validPortalConfiguration(configuration))throw unavailable('Billing management is not configured safely.');
     const session=await s.billingPortal.sessions.create({customer:e.customerId,configuration:env.STRIPE_PORTAL_CONFIGURATION_ID,return_url:`${env.SITE_URL}/?billing=return#account`});return {url:session.url};

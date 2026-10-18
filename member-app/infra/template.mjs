@@ -142,7 +142,7 @@ export function appTemplate() {
   });
   r.LogGroup = resource('AWS::Logs::LogGroup', { LogGroupName: sub('/aws/lambda/${FunctionName}'), RetentionInDays: 30 });
   r.ApiLogs = resource('AWS::Logs::LogGroup', { RetentionInDays: 30 });
-  r.FailedWork = resource('AWS::SQS::Queue', { MessageRetentionPeriod: 1209600, SqsManagedSseEnabled: true });
+  r.FailedWork = resource('AWS::SQS::Queue', { MessageRetentionPeriod: 1209600, SqsManagedSseEnabled: true }, retain);
   r.ApiOriginSecret = resource('AWS::SecretsManager::Secret', {
     Description: 'Random RoleClue CloudFront-to-API origin credential',
     GenerateSecretString: {ExcludePunctuation: true, IncludeSpace: false, PasswordLength: 64},
@@ -150,11 +150,11 @@ export function appTemplate() {
   r.GenerationQueue = resource('AWS::SQS::Queue', {
     MessageRetentionPeriod: 345600, VisibilityTimeout: 600, SqsManagedSseEnabled: true,
     RedrivePolicy: { deadLetterTargetArn: get('FailedWork', 'Arn'), maxReceiveCount: 3 },
-  });
+  }, retain);
   r.RecommendationQueue = resource('AWS::SQS::Queue', {
     MessageRetentionPeriod: 345600, VisibilityTimeout: 600, SqsManagedSseEnabled: true,
     RedrivePolicy: { deadLetterTargetArn: get('FailedWork', 'Arn'), maxReceiveCount: 3 },
-  });
+  }, retain);
   r.AlarmTopic = resource('AWS::SNS::Topic', { DisplayName: 'RoleClue production alerts' });
   r.AlarmSubscription = resource('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: ref('AlarmEmail'), TopicArn: ref('AlarmTopic') });
   r.LambdaRole = resource('AWS::IAM::Role', {

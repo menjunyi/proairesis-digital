@@ -23,6 +23,23 @@ runInNewContext(compiled, {
 });
 
 const { ApplicationWorkspace, AuthScreen, OpportunitiesScreen } = appModule.exports;
+const guestModule = { exports: {} };
+const guestCompiled = buildSync({
+  entryPoints: [
+    fileURLToPath(new URL("../src/GuestJourney.jsx", import.meta.url)),
+  ],
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  packages: "external",
+  write: false,
+}).outputFiles[0].text;
+runInNewContext(guestCompiled, {
+  require: createRequire(import.meta.url),
+  module: guestModule,
+  exports: guestModule.exports,
+});
+const { GuestRestoreFailure, guestRestoreRecovery } = guestModule.exports;
 const capabilities = {
   recommendations: false,
   guestDiscovery: false,
@@ -96,4 +113,22 @@ test("opportunity and application visual tabs expose their selected state", () =
     if (storage === undefined) delete globalThis.sessionStorage;
     else globalThis.sessionStorage = storage;
   }
+});
+
+test("guest restore failures offer retry and explicit restart without implying lost progress", () => {
+  assert.equal(guestRestoreRecovery({ status: 503 }), "retry");
+  assert.equal(guestRestoreRecovery(new Error("Network unavailable")), "retry");
+  assert.equal(guestRestoreRecovery({ status: 404 }), "restart");
+  assert.equal(guestRestoreRecovery({ status: 410 }), "restart");
+  const html = renderToStaticMarkup(
+    React.createElement(GuestRestoreFailure, {
+      error: new Error("Synthetic temporary interruption"),
+      onRetry() {},
+      onRestart() {},
+    }),
+  );
+  assert.match(html, /Your guest progress is still saved in this browser/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, />Try again<\/button>/);
+  assert.match(html, />Start a new search<\/button>/);
 });

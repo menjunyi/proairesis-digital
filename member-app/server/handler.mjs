@@ -32,6 +32,18 @@ const decodePathId=value=>{
   if(!decoded||decoded.length>200||decoded.includes('/')||/[\u0000-\u001f\u007f]/.test(decoded))throw new HttpError(400,'INVALID_PATH_ID','This resource identifier is invalid.');
   return decoded;
 };
+const ACCOUNT_DELETION_AUTH_MAX_AGE_SECONDS=10*60;
+const ACCOUNT_DELETION_AUTH_CLOCK_SKEW_SECONDS=60;
+const authTimeFromClaim=value=>{
+  const parsed=typeof value==='number'?value:typeof value==='string'&&/^[1-9]\d{0,15}$/.test(value)?Number(value):null;
+  return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
+};
+const assertRecentDeletionAuth=user=>{
+  const now=Math.floor(Date.now()/1000),age=now-user.authTime;
+  if(!Number.isSafeInteger(user.authTime)||age>ACCOUNT_DELETION_AUTH_MAX_AGE_SECONDS||age<-ACCOUNT_DELETION_AUTH_CLOCK_SKEW_SECONDS){
+    throw new HttpError(401,'REAUTHENTICATION_REQUIRED','For your security, sign out and sign in again before permanently deleting your account.');
+  }
+};
 
 export async function processGenerationBatch(service,event){
   const failures=[];
@@ -123,8 +135,8 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       if(path==='/api/guest/session'&&method==='POST')return reply(200,await service.readGuest(body,sourceIp));
       if(path==='/api/guest/ignore'&&method==='POST')return reply(200,await service.ignoreGuest(body,sourceIp));
       let user;
-      if(mode==='demo'){if(incoming.authorization!=='Bearer demo')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in to continue.');user={sub:'demo-user',email:'demo@example.test',name:'Alex Example',identityUsername:'demo-user'};}
-      else{const claims=event.requestContext?.authorizer?.jwt?.claims,identityUsername=claims?.['cognito:username'];if(!claims?.sub||!claims.email||!(claims.email_verified===true||claims.email_verified==='true')||claims.token_use!=='id'||identityUsername!==undefined&&(typeof identityUsername!=='string'||!identityUsername||identityUsername.length>128||/[\u0000-\u001f\u007f]/.test(identityUsername)))throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in with a verified email to continue.');user={sub:claims.sub,email:claims.email,name:typeof claims.name==='string'?claims.name:'',identityUsername:identityUsername??claims.sub};}
+      if(mode==='demo'){if(incoming.authorization!=='Bearer demo')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in to continue.');user={sub:'demo-user',email:'demo@example.test',name:'Alex Example',identityUsername:'demo-user',authTime:Math.floor(Date.now()/1000)};}
+      else{const claims=event.requestContext?.authorizer?.jwt?.claims,identityUsername=claims?.['cognito:username'];if(!claims?.sub||!claims.email||!(claims.email_verified===true||claims.email_verified==='true')||claims.token_use!=='id'||identityUsername!==undefined&&(typeof identityUsername!=='string'||!identityUsername||identityUsername.length>128||/[\u0000-\u001f\u007f]/.test(identityUsername)))throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in with a verified email to continue.');user={sub:claims.sub,email:claims.email,name:typeof claims.name==='string'?claims.name:'',identityUsername:identityUsername??claims.sub,authTime:authTimeFromClaim(claims.auth_time)};}
       if(!(path==='/api/account'&&method==='DELETE'))await service.assertActive(user);
       const cursor=()=>{
         const query=new URLSearchParams(event.rawQueryString??'');
@@ -154,7 +166,7 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       else if(path==='/api/billing/portal'&&method==='POST')result=await service.portal(user);
       else if(path==='/api/billing/refresh'&&method==='POST')result=await service.refreshBilling(user);
       else if(path==='/api/export'&&method==='GET')result=await service.exportAccount(user,cursor());
-      else if(path==='/api/account'&&method==='DELETE')result=await service.deleteAccount(user,body);
+      else if(path==='/api/account'&&method==='DELETE'){assertRecentDeletionAuth(user);result=await service.deleteAccount(user,body);}
       else throw new HttpError(404,'NOT_FOUND','This API route was not found.');
       return reply(200,result);
     }catch(e){

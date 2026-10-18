@@ -150,6 +150,40 @@ export function selectedApplicationId(applications, currentId, preferredId) {
   return applications[0]?.id || null;
 }
 
+export function hasUnsavedApplicationChanges(
+  application,
+  notes,
+  currentLetter,
+  text,
+) {
+  const notesChanged = notes !== (application?.notes || "");
+  const letterChanged =
+    Boolean(currentLetter) && text !== (currentLetter.text || "");
+  return notesChanged || letterChanged;
+}
+
+export function allowApplicationSelection(
+  currentId,
+  nextId,
+  hasUnsavedChanges,
+  confirmDiscard,
+) {
+  if (currentId === nextId || !hasUnsavedChanges) return true;
+  return confirmDiscard();
+}
+
+export function pendingGenerationForRestore(serverGeneration, storedGenerationId) {
+  if (
+    serverGeneration?.status === "pending" &&
+    typeof serverGeneration.id === "string" &&
+    serverGeneration.id
+  )
+    return serverGeneration;
+  if (typeof storedGenerationId === "string" && storedGenerationId)
+    return { id: storedGenerationId, status: "pending" };
+  return null;
+}
+
 export function generationFailureMessage(generation) {
   const failure = generation?.error;
   if (typeof failure === "string" && failure.trim()) return failure.trim();

@@ -92,6 +92,40 @@ function ErrorBox({ error }) {
   );
 }
 
+export function guestRestoreRecovery(error) {
+  return [404, 410].includes(error?.status) ? "restart" : "retry";
+}
+
+export function GuestRestoreFailure({ error, onRetry, onRestart }) {
+  return (
+    <section
+      className="guest-card guest-empty"
+      aria-labelledby="guest-restore-title"
+    >
+      <CircleHelp size={30} aria-hidden="true" />
+      <h1 id="guest-restore-title">We could not restore your search.</h1>
+      <p>
+        Your guest progress is still saved in this browser. Try again when your
+        connection is ready, or start a new search to remove that saved
+        progress.
+      </p>
+      <ErrorBox error={error} />
+      <div className="guest-recovery-actions">
+        <button className="button" type="button" onClick={onRetry}>
+          Try again
+        </button>
+        <button
+          className="button secondary"
+          type="button"
+          onClick={onRestart}
+        >
+          Start a new search
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function Field({ label, hint, children }) {
   const id = React.useId();
   return (
@@ -511,6 +545,8 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
   const [step, setStep] = useState(() => readGuestState()?.step || "situation");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(null);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const restored = useRef(false);
   const previousStep = useRef(step);
 
@@ -532,6 +568,8 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     if (!session?.token || restored.current) return;
     restored.current = true;
     setBusy("restore");
+    setRestoreFailed(false);
+    setError(null);
     guestApi("/guest/session", { token: session.token })
       .then((result) => {
         setBundle(result.guest || result);
@@ -539,14 +577,34 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
         setStep(next === "searching" ? "review" : next);
       })
       .catch((failure) => {
-        if ([404, 410].includes(failure.status)) {
+        if (guestRestoreRecovery(failure) === "restart") {
           clearGuestState();
           setSession(null);
           setStep("situation");
-        } else setError(failure);
+        } else {
+          setRestoreFailed(true);
+          setError(failure);
+        }
       })
       .finally(() => setBusy(""));
-  }, [guestApi, session?.token]);
+  }, [guestApi, restoreAttempt, session?.token]);
+
+  function retryRestore() {
+    restored.current = false;
+    setRestoreFailed(false);
+    setError(null);
+    setRestoreAttempt((attempt) => attempt + 1);
+  }
+
+  function restartAfterRestoreFailure() {
+    clearGuestState();
+    restored.current = false;
+    setSession(null);
+    setBundle(null);
+    setStep("situation");
+    setRestoreFailed(false);
+    setError(null);
+  }
 
   function persist(nextStep, result, token = session?.token) {
     const expiresAt = result?.expiresAt || result?.guest?.expiresAt || session?.expiresAt;
@@ -635,6 +693,17 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     return (
       <GuestShell step={step} onSignIn={onSignIn}>
         <div className="guest-loading" role="status"><LoaderCircle className="spin" /> Restoring your private guest session</div>
+      </GuestShell>
+    );
+  }
+  if (restoreFailed && !bundle) {
+    return (
+      <GuestShell step={step} onSignIn={onSignIn}>
+        <GuestRestoreFailure
+          error={error}
+          onRetry={retryRestore}
+          onRestart={restartAfterRestoreFailure}
+        />
       </GuestShell>
     );
   }

@@ -239,6 +239,15 @@ test('billing portal fails closed when any pinned safety contract field drifts',
   });
 });
 
+test('billing portal verifies reverse customer ownership before contacting Stripe',async t=>{
+  for(const [name,userSub] of [['missing mapping',null],['foreign mapping','mallory']])await t.test(name,async()=>{
+    const {state,billing,store}=await fixture(),mapping=await store.get('BILLING#customers','cus_alice');
+    await store.transact([userSub===null?{pk:mapping.pk,sk:mapping.sk,expected:mapping.revision,remove:true}:change(mapping.pk,mapping.sk,mapping,{userSub})]);
+    await assert.rejects(billing.portal(user,store),error=>error.status===503&&error.message==='Billing ownership could not be verified.');
+    assert.deepEqual(state.portalRetrievals,[]);assert.deepEqual(state.portals,[]);
+  });
+});
+
 test('same-contract checkout retries keep one versioned Stripe idempotency key',async()=>{
   const {state,billing,store}=await fixture();
   const row=await store.get('USER#alice','ENTITLEMENT');await store.transact([change('USER#alice','ENTITLEMENT',row,{...row.value,subscriptionId:null,status:'none'})]);

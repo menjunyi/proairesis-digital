@@ -1450,7 +1450,7 @@ button svg {
 .ai-processing-consent {
   margin: 20px 0;
   padding: 14px;
-  background: var(--cream);
+  background: var(--paper);
   border-radius: 12px;
 }
 
@@ -3537,6 +3537,12 @@ button svg {
 .guest-empty p {
   color: var(--muted);
   max-width: 560px;
+}
+.guest-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
 }
 .guest-footer {
   display: flex;

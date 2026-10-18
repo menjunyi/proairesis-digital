@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  allowApplicationSelection,
   capabilitiesFor,
   continuationRecovery,
   generationFailureMessage,
   guestJourneyAvailable,
+  hasUnsavedApplicationChanges,
   memberRoute,
   mergeApplicationUpdate,
   mergeResumeUpload,
@@ -313,6 +315,82 @@ test("an Interested continuation opens the exact application", () => {
     "older",
   );
   assert.equal(selectedApplicationId(applications, null, null), "older");
+});
+
+test("application selection protects unsaved notes and cover-letter edits", () => {
+  const letter = { id: "letter-1", text: "Saved letter" };
+  const application = { id: "application-1", notes: "Saved notes" };
+  assert.equal(
+    hasUnsavedApplicationChanges(
+      application,
+      "Saved notes",
+      letter,
+      "Saved letter",
+    ),
+    false,
+  );
+  assert.equal(
+    hasUnsavedApplicationChanges(
+      application,
+      "Changed notes",
+      letter,
+      "Saved letter",
+    ),
+    true,
+  );
+  assert.equal(
+    hasUnsavedApplicationChanges(
+      application,
+      "Saved notes",
+      letter,
+      "Changed letter",
+    ),
+    true,
+  );
+
+  let confirmations = 0;
+  const cancelDiscard = () => {
+    confirmations += 1;
+    return false;
+  };
+  assert.equal(
+    allowApplicationSelection(
+      "application-1",
+      "application-1",
+      true,
+      cancelDiscard,
+    ),
+    true,
+  );
+  assert.equal(
+    allowApplicationSelection(
+      "application-1",
+      "application-2",
+      false,
+      cancelDiscard,
+    ),
+    true,
+  );
+  assert.equal(confirmations, 0);
+  assert.equal(
+    allowApplicationSelection(
+      "application-1",
+      "application-2",
+      true,
+      cancelDiscard,
+    ),
+    false,
+  );
+  assert.equal(confirmations, 1);
+  assert.equal(
+    allowApplicationSelection(
+      "application-1",
+      "application-2",
+      true,
+      () => true,
+    ),
+    true,
+  );
 });
 
 function memoryStorage() {

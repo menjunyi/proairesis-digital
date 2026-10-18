@@ -165,6 +165,15 @@ function publicGeneration(value){
   }=value;
   return generation;
 }
+function publicPendingGeneration(value){
+  if(value?.status!=='pending'||!validGenerationId(value.id)||typeof value.appId!=='string')return null;
+  return {id:value.id,appId:value.appId,status:'pending',createdAt:value.createdAt};
+}
+function publicApplication(value){
+  if(!value)return value;
+  const {pendingGenerationId:_pendingGenerationId,...application}=value;
+  return application;
+}
 
 export function createService({store,mode='production',provider,dispatch,files,billing,feed,identity,guestSearch,guestRateSecret,requireAiConsent=false,extract=extractResume}) {
   const demo=mode==='demo';
@@ -187,13 +196,18 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(!validUserSub(sub))return;
     const tombstone=await store.get('ACCOUNT#deleted',tombstoneKey(sub));
     if(!tombstone)return;
-    const rows=(await store.list(BILLING_CUSTOMER_REGISTRY_PK)).filter(row=>row.value?.userSub===sub);
-    for(let index=0;index<rows.length;index+=25){
-      await store.transact([
-        {pk:'ACCOUNT#deleted',sk:tombstoneKey(sub),expected:tombstone.revision,checkOnly:true},
-        ...rows.slice(index,index+25).map(row=>({pk:row.pk,sk:row.sk,expected:row.revision,remove:true})),
-      ]);
-    }
+    let after=null;
+    do{
+      const page=await store.listPage(BILLING_CUSTOMER_REGISTRY_PK,'',{after,limit:BILLING_RECONCILIATION_PAGE_SIZE});
+      const owned=page.items.filter(row=>row.value?.userSub===sub);
+      for(let index=0;index<owned.length;index+=25){
+        await store.transact([
+          {pk:'ACCOUNT#deleted',sk:tombstoneKey(sub),expected:tombstone.revision,checkOnly:true},
+          ...owned.slice(index,index+25).map(row=>({pk:row.pk,sk:row.sk,expected:row.revision,remove:true})),
+        ]);
+      }
+      after=page.nextAfter;
+    }while(after);
   }
   function generationRegistrationValue(sub,id,createdAt=iso()){
     return {version:1,userSub:sub,tenantHash:generationTenantHash(sub),generationId:id,createdAt};
@@ -242,6 +256,33 @@ export function createService({store,mode='production',provider,dispatch,files,b
       for(const row of page.items)await removeGenerationRegistrationRow(row);
       after=page.nextAfter;
     }while(after);
+  }
+  async function registeredPendingGenerations(sub){
+    if(!validUserSub(sub))throw Error('Invalid pending generation identity');
+    const prefix=`${generationTenantHash(sub)}#`,registrations=await store.list(GENERATION_OUTBOX_PK,prefix),pending=[];
+    for(let index=0;index<registrations.length;index+=20){
+      const batch=registrations.slice(index,index+20);
+      for(const [offset,row] of (await Promise.all(batch.map(item=>store.get(`USER#${sub}`,`GEN#${item.value?.generationId}`)))).entries()){
+        const registration=batch[offset];
+        if(!validGenerationRegistration(registration)||registration.value.userSub!==sub)throw Error('Pending generation registry conflict');
+        if(row?.value.status==='pending'&&row.value.id===registration.value.generationId)pending.push({row,registration});
+      }
+    }
+    pending.sort((a,b)=>String(a.row.value.createdAt??'').localeCompare(String(b.row.value.createdAt??''))||a.row.value.id.localeCompare(b.row.value.id));
+    return pending;
+  }
+  async function pendingGenerationForApplication(sub,appId,hintedId){
+    const pk=`USER#${sub}`;
+    if(hintedId!==undefined){
+      if(!validGenerationId(hintedId))throw Error('Invalid application generation pointer');
+      const hinted=await store.get(pk,`GEN#${hintedId}`);
+      if(hinted?.value.status==='pending'){
+        if(hinted.value.appId!==appId)throw Error('Application generation ownership conflict');
+        return hinted;
+      }
+    }
+    const registered=await registeredPendingGenerations(sub);
+    return registered.find(item=>item.row.value.appId===appId)?.row??null;
   }
   async function backfillPendingGenerationRegistrations(){
     if(typeof store.scanPage!=='function')throw Error('Generation outbox backfill scan is unavailable');
@@ -546,7 +587,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     // snapshots are nonessential cleanup and are removed in bounded batches so
     // a long, valid guest history cannot exceed DynamoDB's transaction limit.
     await cleanupGuestJobs(initial.pk).catch(()=>{});
-    return {...result,billing:billingView(await getEntitlement(userPk))};
+    return {...result,application:publicApplication(result.application),billing:billingView(await getEntitlement(userPk))};
   }
   async function abandonGuest(user,input,sourceIp){
     const initial=await requiredGuest(input.token);await consumeGuestRate(initial.pk,sourceIp,'abandon');
@@ -741,7 +782,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       if(input.decision==='undecided'&&storedAssessment)decisionValue.assessmentSnapshot=cachedAssessment??storedAssessment;
       const changes=[change(pk,`DECISION#${id}`,row,decisionValue)];
       if(input.decision==='interested'&&!app){const match=profile&&assess(profile,job);if(!match||!profile.confirmed)fail(409,'PROFILE_OR_JOB_CHANGED','Review your profile and refreshed opportunities first.');const {job:_duplicateJob,...matchDetails}=match;application={id,job,match:matchDetails,status:'interested',notes:'',createdAt:iso(),updatedAt:iso(),letters:[]};changes.push(change(pk,`APP#${id}`,null,application));}
-      await store.transact(changes);return {application};
+      await store.transact(changes);return {application:publicApplication(application)};
     });
   }
   async function availabilityContext(pk){
@@ -781,8 +822,17 @@ export function createService({store,mode='production',provider,dispatch,files,b
   }
   async function applications(user,cursor){
     const pk=pkOf(user);await assertActive(pk);
-    const rows=await store.list(pk,'APP#'),letterRows=await store.list(pk,'LETTER#');
-    const state=paginationState(user,'applications',[...rows,...letterRows],cursor);
+    const rows=await store.list(pk,'APP#'),letterRows=await store.list(pk,'LETTER#'),registeredPending=await registeredPendingGenerations(user.sub),pendingByApplication=new Map();
+    for(const item of registeredPending){
+      const generation=item.row.value;
+      if(!pendingByApplication.has(generation.appId))pendingByApplication.set(generation.appId,generation);
+    }
+    const pointed=rows.filter(row=>row.value.pendingGenerationId);
+    for(let index=0;index<pointed.length;index+=20){
+      const batch=pointed.slice(index,index+20),generationRows=await Promise.all(batch.map(row=>pendingGenerationForApplication(user.sub,row.value.id,row.value.pendingGenerationId)));
+      generationRows.forEach((generationRow,offset)=>{if(generationRow)pendingByApplication.set(batch[offset].value.id,generationRow.value);});
+    }
+    const state=paginationState(user,'applications',[...rows,...letterRows,...registeredPending.map(item=>item.registration)],cursor);
     if(state.index>rows.length||state.index===rows.length&&state.letterOffset)fail(400,'INVALID_CURSOR','This application page cursor is invalid.');
     const context=await availabilityContext(pk),lettersByApplication=new Map();
     for(const row of letterRows){
@@ -795,7 +845,8 @@ export function createService({store,mode='production',provider,dispatch,files,b
     while(index<rows.length&&page.applications.length<20){
       const row=rows[index],letters=lettersByApplication.get(row.value.id)??[];
       if(letterOffset>letters.length)fail(400,'INVALID_CURSOR','This application page cursor is invalid.');
-      const application={...row.value,job:jobAvailability(row.value.job,context),letters:[]};
+      const storedApplication=publicApplication(row.value),pendingGeneration=publicPendingGeneration(pendingByApplication.get(row.value.id));
+      const application={...storedApplication,job:jobAvailability(row.value.job,context),letters:[],...(pendingGeneration?{pendingGeneration}:{})};
       const baseBytes=jsonBytes(application)+(page.applications.length?1:0);
       if(bytes+baseBytes>PAGE_BYTES){if(page.applications.length)break;fail(413,'PAGE_TOO_LARGE','An application record is too large to return safely. Contact support.');}
       bytes+=baseBytes;
@@ -813,7 +864,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(index<rows.length)page.nextCursor=nextPageCursor({...state,index,letterOffset});
     return assertPageFits(page);
   }
-  async function updateApplication(user,id,input){const pk=pkOf(user);return retryConflict(async()=>{await assertActive(pk);const row=await store.get(pk,`APP#${id}`);if(!row)fail(404,'NOT_FOUND','Application not found.');const application={...row.value,updatedAt:iso()};if('status'in input){if(!['interested','preparing','applied','interview','offer','closed'].includes(input.status))fail(400,'INVALID_STATUS','Choose a valid application status.');application.status=input.status;}if('notes'in input)application.notes=safeString(input.notes,10000);await store.transact([change(pk,`APP#${id}`,row,application)]);const {letters:_letters,...metadata}=application;return {application:{...metadata,job:jobAvailability(application.job,await availabilityContext(pk))}};});}
+  async function updateApplication(user,id,input){const pk=pkOf(user);return retryConflict(async()=>{await assertActive(pk);const row=await store.get(pk,`APP#${id}`);if(!row)fail(404,'NOT_FOUND','Application not found.');const application={...row.value,updatedAt:iso()};if('status'in input){if(!['interested','preparing','applied','interview','offer','closed'].includes(input.status))fail(400,'INVALID_STATUS','Choose a valid application status.');application.status=input.status;}if('notes'in input)application.notes=safeString(input.notes,10000);await store.transact([change(pk,`APP#${id}`,row,application)]);const {letters:_letters,...metadata}=publicApplication(application);return {application:{...metadata,job:jobAvailability(application.job,await availabilityContext(pk))}};});}
   async function scheduleGeneration(sub,id,{repair=false}={}){
     if(!dispatch)return runGeneration(sub,id);
     const pk=`USER#${sub}`,attemptId=randomUUID(),attemptedAt=iso(),dispatchLeaseUntil=new Date(Date.now()+DISPATCH_LEASE_MS).toISOString();
@@ -912,8 +963,16 @@ export function createService({store,mode='production',provider,dispatch,files,b
     const pk=pkOf(user),id=createHash('sha256').update(`${user.sub}:${key}`).digest('hex'),sk=`GEN#${id}`,outboxSk=generationOutboxKey(user.sub,id);
     const result=await retryConflict(async()=>{
       await assertActive(pk);const previous=await store.get(pk,sk);if(previous){if(previous.value.appId!==appId)fail(409,'KEY_ALREADY_USED','Use a new request key for another application.');return {generation:previous.value,billing:billingView(await getEntitlement(pk)),created:false};}
+      const app=await store.get(pk,`APP#${appId}`);if(!app)fail(404,'NOT_FOUND','Application not found.');
+      const active=await pendingGenerationForApplication(user.sub,appId,app.value.pendingGenerationId);
+      if(active){
+        if(app.value.pendingGenerationId!==active.value.id){
+          await store.transact([change(pk,`APP#${appId}`,app,{...app.value,pendingGenerationId:active.value.id}),{pk,sk:active.sk,expected:active.revision,checkOnly:true}]);
+        }
+        return {generation:active.value,billing:billingView(await getEntitlement(pk)),created:false};
+      }
       if(requireAiConsent&&input.aiProcessingConfirmed!==true)fail(400,'AI_CONSENT_REQUIRED','Confirm that OpenAI may process your reviewed resume and this job description before generating.');
-      const app=await store.get(pk,`APP#${appId}`),profile=await store.get(pk,'PROFILE');if(!app)fail(404,'NOT_FOUND','Application not found.');if(!profile?.value.confirmed)fail(409,'PROFILE_INCOMPLETE','Confirm your reviewed profile before generating.');
+      const profile=await store.get(pk,'PROFILE');if(!profile?.value.confirmed)fail(409,'PROFILE_INCOMPLETE','Confirm your reviewed profile before generating.');
       if(jobAvailability(app.value.job,await availabilityContext(pk)).availability==='closed')fail(409,'OPPORTUNITY_CLOSED','This opportunity is closed. Your existing letters remain available, but new generation is disabled.');
       if(!(await provider?.available()))fail(503,'SERVICE_UNAVAILABLE','Cover-letter generation is temporarily unavailable or the daily budget is exhausted. Your allowance has not been used.');
       const row=await store.get(pk,'ENTITLEMENT'),e=row?.value??blankEntitlement(),view=billingView(e);
@@ -932,18 +991,19 @@ export function createService({store,mode='production',provider,dispatch,files,b
       const registration=registry
         ?{pk:registry.pk,sk:registry.sk,expected:registry.revision,checkOnly:true}
         :change(GENERATION_OUTBOX_PK,outboxSk,null,generationRegistrationValue(user.sub,id,generation.createdAt));
-      await store.transact([change(pk,'ENTITLEMENT',row,e),change(pk,sk,null,generation),registration]);return {generation,billing:billingView(e),created:true};
+      await store.transact([change(pk,'ENTITLEMENT',row,e),change(pk,sk,null,generation),change(pk,`APP#${appId}`,app,{...app.value,pendingGenerationId:id}),registration]);return {generation,billing:billingView(e),created:true};
     });
-    if(result.generation.status==='pending')await ensureGenerationRegistration(user.sub,id,result.generation.createdAt);
-    if(result.created){if(dispatch)await scheduleGeneration(user.sub,id);else try{await runGeneration(user.sub,id);}catch(error){if(!error.uncertain)throw error;}}
-    return generationResult(user,id);
+    const resultId=result.generation.id;
+    if(result.generation.status==='pending')await ensureGenerationRegistration(user.sub,resultId,result.generation.createdAt);
+    if(result.created){if(dispatch)await scheduleGeneration(user.sub,resultId);else try{await runGeneration(user.sub,resultId);}catch(error){if(!error.uncertain)throw error;}}
+    return generationResult(user,resultId);
   }
   async function generationResult(user,id){const pk=pkOf(user);await assertActive(pk);let row=await store.get(pk,`GEN#${id}`);if(!row)fail(404,'NOT_FOUND','Generation not found.');if(row.value.status==='pending')await ensureGenerationRegistration(user.sub,id,row.value.createdAt);if(dispatch&&row.value.status==='pending'&&!row.value.providerStartedAt&&!row.value.dispatchedAt&&!futureIso(row.value.dispatchLeaseUntil)){await scheduleGeneration(user.sub,id);row=await store.get(pk,`GEN#${id}`);}return {generation:publicGeneration(row.value),billing:billingView(await getEntitlement(pk))};}
   async function finishGeneration(sub,id,text,message){
     const pk=`USER#${sub}`,outboxSk=generationOutboxKey(sub,id);return retryConflict(async()=>{const [row,registry]=await Promise.all([store.get(pk,`GEN#${id}`),store.get(GENERATION_OUTBOX_PK,outboxSk)]);
       if(registry&&!validGenerationRegistration(registry))throw Error('Pending generation registry conflict');
       if(!row||row.value.status!=='pending'){if(registry)await store.transact([{pk:registry.pk,sk:registry.sk,expected:registry.revision,remove:true}]);return;}
-      const eRow=await store.get(pk,'ENTITLEMENT'),e=eRow?.value??blankEntitlement(),g=row.value,bucket=e[g.bucket];const bucketMatches=g.bucket==='free'||bucket?.key===g.periodKey;
+      const g=row.value,[eRow,appRow]=await Promise.all([store.get(pk,'ENTITLEMENT'),store.get(pk,`APP#${g.appId}`)]),e=eRow?.value??blankEntitlement(),bucket=e[g.bucket];const bucketMatches=g.bucket==='free'||bucket?.key===g.periodKey;
       const accessRevoked=g.bucket==='starter'&&['refunded','disputed'].includes(bucket?.status)||g.bucket==='paid'&&['refunded','disputed'].includes(e.status);
       const acceptedText=text&&!accessRevoked?text:null;
       if(bucketMatches){bucket.reserved=Math.max(0,bucket.reserved-1);if(acceptedText)bucket.used++;}
@@ -951,6 +1011,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       const generation={...safe,status:acceptedText?'succeeded':'failed',completedAt:iso(),...(letter?{letter}:{error:accessRevoked?'Your paid allowance was revoked before this letter completed. No generation was consumed.':message??'Generation failed. Your allowance was restored.'})};
       const changes=[change(pk,'ENTITLEMENT',eRow,e),change(pk,`GEN#${id}`,row,generation)];
       if(letter)changes.push(change(pk,`LETTER#${g.appId}#${id}`,null,letter));
+      if(appRow?.value.pendingGenerationId===id){const application={...appRow.value};delete application.pendingGenerationId;changes.push(change(pk,`APP#${g.appId}`,appRow,application));}
       if(registry)changes.push({pk:registry.pk,sk:registry.sk,expected:registry.revision,remove:true});
       await store.transact(changes);
     });
@@ -1031,7 +1092,8 @@ export function createService({store,mode='production',provider,dispatch,files,b
       let value;
       if(row.sk==='PROFILE'){const {resumeObjectKey:_resumeObjectKey,resumeUploadId:_resumeUploadId,...profile}=row.value;value=profile;}
       else if(row.sk==='ENTITLEMENT')value=billingView(row.value);
-      else if(/^(APP#|LETTER#|DECISION#|IMPORTED_JOB#)/.test(row.sk))value=row.value;
+      else if(row.sk.startsWith('APP#'))value=publicApplication(row.value);
+      else if(/^(LETTER#|DECISION#|IMPORTED_JOB#)/.test(row.sk))value=row.value;
       else if(row.sk.startsWith('GEN#'))value=publicGeneration(row.value);
       if(value){records.push({type:row.sk,value});semanticRows.push(row);}
     }
@@ -1049,6 +1111,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
   }
   async function deleteAccount(user,input){
     if(input.confirmation!=='DELETE')fail(400,'CONFIRMATION_REQUIRED','Type DELETE to confirm.');
+    if(typeof store.listPage!=='function')fail(503,'SERVICE_UNAVAILABLE','Account deletion is temporarily unavailable.');
     const pk=pkOf(user),deletedSk=tombstoneKey(user.sub);
     if(!(await store.get('ACCOUNT#deleted',deletedSk))){
       let billingDeletion=null;

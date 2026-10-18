@@ -64,14 +64,17 @@ import {
 } from "./api";
 import { canRequestLetter, listingAvailability } from "./availability";
 import {
+  allowApplicationSelection,
   capabilitiesFor,
   continuationRecovery,
   generationFailureMessage,
   guestJourneyAvailable,
+  hasUnsavedApplicationChanges,
   memberRoute,
   mergeApplicationUpdate,
   mergeResumeUpload,
   opportunityLoadRequest,
+  pendingGenerationForRestore,
   selectedApplicationId,
 } from "./ui-state";
 import {
@@ -3312,6 +3315,7 @@ function ApplicationsScreen({
 }) {
   const [applications, setApplications] = useState(null),
     [selectedId, setSelectedId] = useState(null),
+    [workspaceDirty, setWorkspaceDirty] = useState(false),
     [error, setError] = useState(null),
     [loading, setLoading] = useState(true);
   const loadSerial = useRef(0);
@@ -3355,6 +3359,23 @@ function ApplicationsScreen({
         ),
       ),
     [],
+  );
+  const selectApplication = useCallback(
+    (nextId) => {
+      const allowed = allowApplicationSelection(
+        selectedId,
+        nextId,
+        workspaceDirty,
+        () =>
+          window.confirm(
+            "You have unsaved notes or cover-letter edits. Select Cancel to return and save them, or OK to discard them and open another application.",
+          ),
+      );
+      if (!allowed) return;
+      setWorkspaceDirty(false);
+      setSelectedId(nextId);
+    },
+    [selectedId, workspaceDirty],
   );
   return (
     <div className="page">
@@ -3405,7 +3426,7 @@ function ApplicationsScreen({
                   "application-list-item",
                   selectedId === app.id && "active",
                 )}
-                onClick={() => setSelectedId(app.id)}
+                onClick={() => selectApplication(app.id)}
               >
                 <span>{app.job.company}</span>
                 <strong>{app.job.title}</strong>
@@ -3432,6 +3453,7 @@ function ApplicationsScreen({
               onUpgrade={onUpgrade}
               onNotice={onNotice}
               onUpdate={update}
+              onDirtyChange={setWorkspaceDirty}
               capabilities={capabilities}
             />
           )}
@@ -3465,14 +3487,20 @@ export function ApplicationWorkspace({
   onUpgrade,
   onNotice,
   onUpdate,
+  onDirtyChange,
   capabilities,
 }) {
+  const initialLetter = application.letters?.at(-1);
   const [notes, setNotes] = useState(application.notes || ""),
-    [text, setText] = useState(""),
-    [letterId, setLetterId] = useState(application.letters?.at(-1)?.id || ""),
+    [text, setText] = useState(initialLetter?.text || ""),
+    [letterId, setLetterId] = useState(initialLetter?.id || ""),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(null),
-    [generation, setGeneration] = useState(null),
+    [generation, setGeneration] = useState(() =>
+      application.pendingGeneration?.status === "pending"
+        ? application.pendingGeneration
+        : null,
+    ),
     [aiProcessingConfirmed, setAiProcessingConfirmed] = useState(false),
     [tab, setTab] = useState("letter");
   const generationKey = `roleclue.generation.${application.id}`;
@@ -3480,18 +3508,51 @@ export function ApplicationWorkspace({
     (l) => l.id === letterId,
   );
   const job = application.job;
+  const hasUnsavedChanges = hasUnsavedApplicationChanges(
+    application,
+    notes,
+    currentLetter,
+    text,
+  );
   useEffect(() => {
     setText(currentLetter?.text || "");
   }, [letterId, currentLetter?.text]);
   useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+    return () => onDirtyChange?.(false);
+  }, [hasUnsavedChanges, onDirtyChange]);
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const warnBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasUnsavedChanges]);
+  useEffect(() => {
+    let saved = {};
     try {
-      const saved = JSON.parse(sessionStorage.getItem(generationKey) || "null");
-      if (saved?.generationId)
-        setGeneration({ id: saved.generationId, status: "pending" });
+      saved = JSON.parse(sessionStorage.getItem(generationKey) || "null") || {};
     } catch {
       /* Corrupt request state can be replaced by a new explicit request. */
     }
-  }, [generationKey]);
+    const recovered = pendingGenerationForRestore(
+      application.pendingGeneration,
+      saved.generationId,
+    );
+    if (application.pendingGeneration?.status === "pending") {
+      const requestState =
+        saved.generationId === application.pendingGeneration.id
+          ? { ...saved, generationId: application.pendingGeneration.id }
+          : { generationId: application.pendingGeneration.id };
+      sessionStorage.setItem(
+        generationKey,
+        JSON.stringify(requestState),
+      );
+    }
+    if (recovered) setGeneration(recovered);
+  }, [application.pendingGeneration, generationKey]);
   const generationResult = useCallback(
     (result) => {
       if (result.billing) onBilling(result.billing);
@@ -3505,13 +3566,14 @@ export function ApplicationWorkspace({
           ),
           value.letter,
         ];
-        onUpdate({ ...application, letters });
+        onUpdate({ ...application, letters, pendingGeneration: null });
         setLetterId(value.letter.id);
         setText(value.letter.text);
         setBusy("");
         onNotice("Your cover-letter draft is ready. Review it before using it.");
       } else if (value.status === "failed") {
         sessionStorage.removeItem(generationKey);
+        onUpdate({ ...application, pendingGeneration: null });
         setBusy("");
         setError(new Error(generationFailureMessage(value)));
       } else if (value.status === "pending") {
@@ -3832,7 +3894,22 @@ export function ApplicationWorkspace({
                 <Field label="Draft version">
                   <select
                     value={letterId}
-                    onChange={(e) => setLetterId(e.target.value)}
+                    onChange={(event) => {
+                      const nextId = event.target.value;
+                      const letterChanged =
+                        Boolean(currentLetter) &&
+                        text !== (currentLetter.text || "");
+                      const allowed = allowApplicationSelection(
+                        letterId,
+                        nextId,
+                        letterChanged,
+                        () =>
+                          window.confirm(
+                            "This cover-letter version has unsaved edits. Select Cancel to return and save them, or OK to discard them and open another version.",
+                          ),
+                      );
+                      if (allowed) setLetterId(nextId);
+                    }}
                   >
                     {application.letters.map((letter, i) => (
                       <option key={letter.id} value={letter.id}>

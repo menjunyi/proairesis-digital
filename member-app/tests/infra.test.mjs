@@ -53,7 +53,7 @@ test('private records are retained, encrypted and isolated from public-site perm
   const resources = appTemplate().Resources;
   assert.equal(resources.ResumeBucket.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy, true);
   assert.equal(resources.Table.Properties.DeletionProtectionEnabled, true);
-  for (const name of ['Table', 'UserPool', 'SiteBucket', 'ResumeBucket']) {
+  for (const name of ['Table', 'UserPool', 'SiteBucket', 'ResumeBucket', 'FailedWork', 'GenerationQueue', 'RecommendationQueue']) {
     assert.equal(resources[name].DeletionPolicy, 'Retain');
     assert.equal(resources[name].UpdateReplacePolicy, 'Retain');
   }
