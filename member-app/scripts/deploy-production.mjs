@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { stripePortalConfigurationId } from '../infra/template.mjs';
 import { hashDirectory, requireSafeStatefulChanges, rollbackHasSkippedResources, updateReadyStackStatus } from './release-safety.mjs';
 
 const ACCOUNT = '037169690315';
@@ -258,6 +259,7 @@ if (mode === '--plan') {
     ['FreehireLicenseApproved', 'true'],
     ['FreehireLicenseReference', 'https://freehire.me/docs/api'],
     ['AlarmEmail', 'support@proairesis.digital'],
+    ['StripePortalConfigurationId', stripePortalConfigurationId],
     ['ApiOriginGateEnabled', apiOriginGateEnabled],
   ]);
   const templateParameters = new Map(Object.entries(template.Parameters ?? {}));
@@ -302,6 +304,7 @@ if (mode === '--plan') {
   requireSafeStatefulChanges(changes);
   const plannedParameters = new Map((planned.Parameters ?? []).map(item => [item.ParameterKey, item.ParameterValue]));
   requireValue(plannedParameters.get('ApiOriginGateEnabled') === apiOriginGateEnabled &&
+    plannedParameters.get('StripePortalConfigurationId') === stripePortalConfigurationId &&
     plannedParameters.get('ArtifactKey') === releaseArtifacts.lambda.key &&
     plannedParameters.get('ArtifactVersion') === releaseArtifacts.lambda.versionId &&
     plannedParameters.get('SiteArtifactVersion') === releaseArtifacts.site.versionId &&
@@ -355,6 +358,7 @@ requireValue(plannedParameters.get('ReleaseId') === manifest.releaseId &&
   plannedParameters.get('SiteArtifactVersionToken') === versionToken(planEvidence.artifacts.site.versionId) &&
   plannedParameters.get('SiteArtifactSha256') === planEvidence.artifacts.site.sha256 &&
   plannedParameters.get('FreehireEnabled') === 'true' && plannedParameters.get('FreehireLicenseApproved') === 'true' &&
+  plannedParameters.get('StripePortalConfigurationId') === stripePortalConfigurationId &&
   plannedParameters.get('ApiOriginGateEnabled') === apiOriginGateEnabled,
 'The reviewed change set has unexpected production release parameters.');
 const remoteLambda = await fetchVerifiedArtifact(planEvidence.artifacts.lambda, `${prefix}/lambda.zip`, 'lambda.zip');
@@ -377,7 +381,7 @@ if (planned.ExecutionStatus === 'AVAILABLE') {
 const deployedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
 requireValue(deployedStack?.StackStatus === 'UPDATE_COMPLETE', 'The production stack update did not complete.');
 const deployedParameters = new Map((deployedStack.Parameters ?? []).map(item => [item.ParameterKey, item.ParameterValue]));
-for (const key of ['ReleaseId', 'ArtifactKey', 'ArtifactVersion', 'SiteArtifactVersion', 'SiteArtifactVersionToken', 'SiteArtifactSha256', 'ApiOriginGateEnabled']) {
+for (const key of ['ReleaseId', 'ArtifactKey', 'ArtifactVersion', 'SiteArtifactVersion', 'SiteArtifactVersionToken', 'SiteArtifactSha256', 'StripePortalConfigurationId', 'ApiOriginGateEnabled']) {
   requireValue(deployedParameters.get(key) === plannedParameters.get(key),
     `The deployed stack parameter ${key} does not match the reviewed release.`);
 }

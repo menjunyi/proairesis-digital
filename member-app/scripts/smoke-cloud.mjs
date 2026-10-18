@@ -3,6 +3,7 @@ import {randomBytes, randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CognitoIdentityProviderClient, DescribeUserPoolCommand, AdminCreateUserCommand, AdminGetUserCommand, AdminSetUserPasswordCommand} from '@aws-sdk/client-cognito-identity-provider';
+import {stripePortalConfigurationId} from '../infra/template.mjs';
 import {verifyLiveRelease, writeSmokeEvidence} from './smoke-evidence.mjs';
 
 // Deliberately not part of npm test or deployment. It creates exactly two
@@ -23,12 +24,15 @@ const ALARM_LOGICAL_IDS = [
   'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm',
   'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm',
   'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm',
-  'AiAuthorityReviewAlarm',
+  'AiAuthorityReviewAlarm', 'DailyRefreshHeartbeatAlarm', 'BillingReconciliationHeartbeatAlarm', 'GenerationRepairHeartbeatAlarm',
 ];
 const METRIC_FILTERS = [
   ['"generation_reconciliation_required"', 'GenerationReconciliationRequired'],
   ['"generation_dispatch_repair_failed"', 'GenerationDispatchRepairFailed'],
   ['"ai_authority_review_required"', 'AiAuthorityReviewRequired'],
+  ['"daily_refresh_completed"', 'DailyRefreshCompleted'],
+  ['"daily_billing_reconciliation_completed"', 'DailyBillingReconciliationCompleted'],
+  ['"generation_repair_completed"', 'GenerationRepairCompleted'],
 ];
 class SmokeCheckError extends Error {}
 
@@ -169,7 +173,7 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(stack?.StackId?.startsWith(`arn:aws:cloudformation:${REGION}:${ACCOUNT}:stack/${stackName}/`), 'Stack account or region mismatch');
   requireCheck(['CREATE_COMPLETE', 'UPDATE_COMPLETE'].includes(stack.StackStatus), 'Stack is not in a completed state');
   const outputs = Object.fromEntries((stack.Outputs ?? []).map(item => [item.OutputKey, item.OutputValue]));
-  for (const key of ['SiteUrl', 'ApiUrl', 'DistributionDomain', 'CognitoUserPoolId', 'CognitoClientId', 'FunctionName', 'FunctionVersion', 'FunctionAliasArn', 'TableName', 'ResumeBucket', 'GenerationQueueUrl', 'RecommendationQueueUrl', 'FailedWorkQueueUrl', 'GenerationQueueArn', 'RecommendationQueueArn', 'FailedWorkQueueArn', 'DailyRefreshScheduleName', 'GenerationRepairScheduleName', 'LogGroupName', 'AlarmTopicArn']) requireCheck(outputs[key], `Stack output ${key} is missing`);
+  for (const key of ['SiteUrl', 'ApiUrl', 'DistributionDomain', 'CognitoUserPoolId', 'CognitoClientId', 'FunctionName', 'FunctionVersion', 'FunctionAliasArn', 'TableName', 'ResumeBucket', 'GenerationQueueUrl', 'RecommendationQueueUrl', 'FailedWorkQueueUrl', 'GenerationQueueArn', 'RecommendationQueueArn', 'FailedWorkQueueArn', 'DailyRefreshScheduleName', 'GenerationRepairScheduleName', 'BillingReconciliationScheduleName', 'AiAuthorityReviewScheduleName', 'LogGroupName', 'AlarmTopicArn']) requireCheck(outputs[key], `Stack output ${key} is missing`);
   const testSignedUpload = env.ROLECLUE_TEST_SIGNED_UPLOAD === '1';
   const uploadOrigin = 'https://app.proairesis.digital';
   requireCheck(outputs.SiteUrl === uploadOrigin, 'Smoke checks require the approved app origin');
@@ -187,6 +191,7 @@ export async function runCloudSmoke(env = process.env) {
   const variables = functionConfig.Environment?.Variables ?? {};
   requireCheck(variables.TABLE_NAME === outputs.TableName && variables.RESUME_BUCKET === outputs.ResumeBucket && variables.COGNITO_USER_POOL_ID === outputs.CognitoUserPoolId, 'Lambda storage or identity outputs mismatch');
   requireCheck(Boolean(variables.STRIPE_PRICE_ID) && Boolean(variables.STRIPE_STARTER_PRICE_ID) &&
+    variables.STRIPE_PORTAL_CONFIGURATION_ID === stripePortalConfigurationId &&
     Number(variables.OPENAI_DAILY_CALL_LIMIT) > 0 && Number(variables.OPENAI_DAILY_TOKEN_LIMIT) > 0 &&
     variables.FREEHIRE_ENABLED === 'true' && variables.FREEHIRE_LICENSE_APPROVED === 'true' &&
     variables.GENERATION_QUEUE_URL === outputs.GenerationQueueUrl &&
@@ -194,6 +199,9 @@ export async function runCloudSmoke(env = process.env) {
   'Billing, AI, job search and durable generation must be configured for production');
   const pool = (await aws('cognito-idp', 'describe-user-pool', {UserPoolId: outputs.CognitoUserPoolId})).UserPool;
   requireCheck(pool?.Arn === `arn:aws:cognito-idp:${REGION}:${ACCOUNT}:userpool/${outputs.CognitoUserPoolId}`, 'Cognito account mismatch');
+  requireCheck(pool.EmailConfiguration?.EmailSendingAccount==='DEVELOPER'&&pool.EmailConfiguration?.SourceArn===`arn:aws:ses:${REGION}:${ACCOUNT}:identity/proairesis.digital`
+    &&pool.EmailConfiguration?.From==='RoleClue <hello@proairesis.digital>'&&pool.EmailConfiguration?.ReplyToEmailAddress==='support@proairesis.digital',
+  'Cognito is not using the verified RoleClue SES sender');
   requireCheck(Object.keys(pool.LambdaConfig ?? {}).length === 0, 'Unexpected Cognito triggers; refusing synthetic user creation');
   const alertSubscriptions=(await aws('sns','list-subscriptions-by-topic',{TopicArn:outputs.AlarmTopicArn})).Subscriptions??[];
   requireCheck(alertSubscriptions.some(item=>item.Protocol==='email'&&item.Endpoint==='support@proairesis.digital'&&
@@ -209,12 +217,15 @@ export async function runCloudSmoke(env = process.env) {
   const schedules = [
     [outputs.DailyRefreshScheduleName, 'feed-refresh'],
     [outputs.GenerationRepairScheduleName, 'generation-repair'],
+    [outputs.BillingReconciliationScheduleName, 'billing-reconciliation'],
+    [outputs.AiAuthorityReviewScheduleName, 'ai-authority-review'],
   ];
   for (const [name,kind] of schedules) {
     const schedule=await aws('scheduler','get-schedule',{Name:name});
     let input;
     try {input=JSON.parse(schedule.Target?.Input??'');} catch {input=null;}
-    requireCheck(schedule.State==='ENABLED'&&schedule.Target?.Arn===outputs.FunctionAliasArn&&input?.kind===kind,
+    requireCheck(schedule.State==='ENABLED'&&schedule.Target?.Arn===outputs.FunctionAliasArn&&input?.kind===kind
+      &&schedule.Target?.DeadLetterConfig?.Arn===outputs.FailedWorkQueueArn,
       `The ${kind} schedule is not enabled on the live alias`);
   }
   const stackResources=(await aws('cloudformation','describe-stack-resources',{StackName:stackName})).StackResources??[];
@@ -225,7 +236,7 @@ export async function runCloudSmoke(env = process.env) {
   requireCheck(alarms.length===alarmNames.length,'One or more production alarms could not be read');
   for (const name of alarmNames) {
     const alarm=alarms.find(item=>item.AlarmName===name);
-    requireCheck(alarm?.ActionsEnabled===true&&alarm.AlarmActions?.includes(outputs.AlarmTopicArn),
+    requireCheck(alarm?.StateValue==='OK'&&alarm.ActionsEnabled===true&&alarm.AlarmActions?.includes(outputs.AlarmTopicArn),
       `Alarm ${name} does not notify the production alert topic`);
   }
   const filters=(await aws('logs','describe-metric-filters',{logGroupName:outputs.LogGroupName,limit:50})).metricFilters??[];
@@ -234,7 +245,7 @@ export async function runCloudSmoke(env = process.env) {
       transform.metricNamespace==='RoleClue'&&transform.metricName===metricName&&transform.metricValue==='1')),
     `Metric filter ${metricName} is missing or invalid`);
   }
-  record('event mappings, daily refresh, generation repair, alarms, log metrics and confirmed alert email verified');
+  record('event mappings, daily refresh, billing reconciliation, generation repair, alarms, log metrics and confirmed alert email verified');
   record('target account, stack, storage, Cognito and production providers verified');
 
   const requireEmptyQueues = async () => {

@@ -119,6 +119,8 @@ test("live release verification rejects an alias or code hash mismatch", async (
 test("release smokes keep separate evidence and cloud acceptance gates", () => {
   const cloud = readFileSync(new URL("../scripts/smoke-cloud.mjs", import.meta.url), "utf8");
   const browser = readFileSync(new URL("../scripts/smoke-browser.mjs", import.meta.url), "utf8");
+  const signup = readFileSync(new URL("../scripts/smoke-signup.mjs", import.meta.url), "utf8");
+  const load = readFileSync(new URL("../scripts/smoke-load.mjs", import.meta.url), "utf8");
   assert.match(cloud, /list-event-source-mappings/);
   assert.match(cloud, /scheduler','get-schedule/);
   assert.match(cloud, /cloudwatch','describe-alarms/);
@@ -130,4 +132,12 @@ test("release smokes keep separate evidence and cloud acceptance gates", () => {
   assert.match(browser, /resolve\("build\/evidence"\)/);
   assert.match(browser, /writeSmokeEvidence\("browser-smoke"/);
   assert.match(browser, /verifyLiveRelease/);
+  assert.match(signup, /writeSmokeEvidence\('signup-smoke'/);
+  assert.match(signup, /verifyLiveRelease/);
+  assert.doesNotMatch(signup, /mailbox:email/);
+  assert.match(load, /verifyLiveRelease/);
+  assert.match(load, /ROLECLUE_EXPECTED_SOURCE_REVISION/);
+  assert.match(load, /new URL\(HEALTH_PATH, outputs\.SiteUrl\)/);
+  assert.match(load, /writeSmokeEvidence\("load-smoke"/);
+  assert.match(load, /combined errors plus HTTP 429 remained below 1%/);
 });

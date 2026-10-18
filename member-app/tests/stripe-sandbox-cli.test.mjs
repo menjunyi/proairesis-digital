@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {argumentsFor,connect,main} from '../scripts/validate-stripe-sandbox.mjs';
+import {argumentsFor,connect,main,monthlySandboxOfferMetadata} from '../scripts/validate-stripe-sandbox.mjs';
+import {TERMS_VERSION} from '../server/service.mjs';
 
 function fixture({account='037169690315',stripeAccount='acct_1UPXnSRvysAJPVoo',key='sk_test_SYNTHETICONLY',config}={}){
   const calls=[];
@@ -14,6 +15,13 @@ test('Stripe sandbox CLI requires explicit apply and a bounded run identifier fo
   assert.throws(()=>argumentsFor(['validate','--apply','--run-id','secret token']),error=>error.code==='RUN_ID');
   assert.throws(()=>argumentsFor(['setup','--apply','--apply']),error=>error.code==='ARGUMENTS');
   assert.equal(argumentsFor(['validate','--apply','--run-id','synthetic-run-001']).runId,'synthetic-run-001');
+});
+
+test('Stripe sandbox lifecycle uses the exact current Plus-50 entitlement metadata',()=>{
+  assert.deepEqual(monthlySandboxOfferMetadata('release-20261019','roleclue-sandbox-user','price_monthly_50'),{
+    app:'roleclue',synthetic_test:'true',run_id:'release-20261019',roleclue_user_id:'roleclue-sandbox-user',
+    roleclue_plan:'monthly',roleclue_price_id:'price_monthly_50',roleclue_offer:'monthly-aud20-50-v2',terms_version:TERMS_VERSION,
+  });
 });
 
 test('help makes no external requests',async()=>{
@@ -34,7 +42,12 @@ test('saved configuration cannot substitute another Stripe account',async()=>{
 });
 
 test('read-only inspection never returns credentials or writes configuration',async()=>{
-  const deps=fixture();const result=await main(['inspect'],deps);
+  const deps=fixture({config:{
+    mode:'sandbox',awsAccount:'037169690315',stripeAccount:'acct_1UPXnSRvysAJPVoo',
+    validation:{runId:'synthetic-run-001',completedAt:'2026-10-19T00:00:00.000Z',checks:['paid_activation_50'],syntheticSubscriptionsEnded:true,customerId:'cus_private'},
+  }});const result=await main(['inspect'],deps);
   assert.equal(result.sandboxVerified,true);assert.equal(result.configPresent,false);assert.equal(JSON.stringify(result).includes('SYNTHETICONLY'),false);
+  assert.deepEqual(result.validation,{runId:'synthetic-run-001',completedAt:'2026-10-19T00:00:00.000Z',checks:['paid_activation_50'],syntheticSubscriptionsEnded:true});
+  assert.equal(JSON.stringify(result).includes('cus_private'),false);
   assert.deepEqual(deps.calls,['/roleclue/member-app/sandbox/stripe-secret-key','stripe-account','/roleclue/member-app/sandbox/billing-config']);
 });

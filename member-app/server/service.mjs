@@ -21,6 +21,8 @@ const RECOMMENDATION_RETRY_MS=15*60*1000;
 const RECOMMENDATION_REGISTRY_PK='RECOMMENDATION_REGISTRY';
 const RECOMMENDATION_STATE_SK='RECOMMENDATION_STATE';
 const RECOMMENDATION_JOB_PREFIX='RECOMMENDATION_JOB#';
+const BILLING_CUSTOMER_REGISTRY_PK='BILLING#customers';
+const BILLING_RECONCILIATION_PAGE_SIZE=50;
 export const GENERATION_OUTBOX_PK='GENERATION_OUTBOX';
 const GENERATION_REPAIR_PAGE_SIZE=50;
 const GENERATION_BACKFILL_PK='SYSTEM#GENERATION_OUTBOX';
@@ -33,6 +35,7 @@ const isPlainObject=value=>value!==null&&typeof value==='object'&&!Array.isArray
 const futureIso=(value,now=Date.now())=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&Date.parse(value)>now;
 const recentIso=(value,maxAge,now=Date.now())=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&Date.parse(value)>now-maxAge;
 const validUserSub=value=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\u0000-\u001f\u007f]/.test(value);
+const validBillingCustomerId=value=>typeof value==='string'&&value.length<=80&&/^cus_[A-Za-z0-9]+$/.test(value);
 const validGenerationId=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const generationTenantHash=sub=>createHash('sha256').update(sub).digest('hex');
 const generationOutboxKey=(sub,id)=>`${generationTenantHash(sub)}#${id}`;
@@ -179,6 +182,18 @@ export function createService({store,mode='production',provider,dispatch,files,b
   async function removeRecommendationRegistration(sub){
     if(!validUserSub(sub))return;
     await retryConflict(async()=>{const row=await recommendationRegistration(sub);if(row)await store.transact([{pk:row.pk,sk:row.sk,expected:row.revision,remove:true}]);});
+  }
+  async function removeBillingRegistrationsForSub(sub){
+    if(!validUserSub(sub))return;
+    const tombstone=await store.get('ACCOUNT#deleted',tombstoneKey(sub));
+    if(!tombstone)return;
+    const rows=(await store.list(BILLING_CUSTOMER_REGISTRY_PK)).filter(row=>row.value?.userSub===sub);
+    for(let index=0;index<rows.length;index+=25){
+      await store.transact([
+        {pk:'ACCOUNT#deleted',sk:tombstoneKey(sub),expected:tombstone.revision,checkOnly:true},
+        ...rows.slice(index,index+25).map(row=>({pk:row.pk,sk:row.sk,expected:row.revision,remove:true})),
+      ]);
+    }
   }
   function generationRegistrationValue(sub,id,createdAt=iso()){
     return {version:1,userSub:sub,tenantHash:generationTenantHash(sub),generationId:id,createdAt};
@@ -504,7 +519,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       const visible=await guestOpportunities(initial.pk,guest);
       if(!visible.some(item=>item.job?.id===id))fail(409,'GUEST_SELECTION_INVALID','Choose one of the high-fit opportunities currently shown.');
       const profileRow=await store.get(userPk,'PROFILE');
-      if(profileRow?.value.confirmed&&profileRow.value.resumeText!==guest.profile.resumeText)fail(409,'ACCOUNT_PROFILE_EXISTS','This account already has a different confirmed profile. Continue with that profile or use a new account.');
+      if(profileRow?.value.confirmed&&profileFingerprint(profileRow.value)!==profileFingerprint(guest.profile))fail(409,'ACCOUNT_PROFILE_EXISTS','This account already has a different confirmed profile. Continue with that profile or use a new account.');
       const profile={...guest.profile,email:user.email,guestClaimedAt:iso()};
       const shortlist=visible.map(item=>assessWithReasons(profile,item.job)).filter(item=>item.highFit);
       const assessment=shortlist.find(item=>item.job.id===id);if(!assessment)fail(409,'PROFILE_OR_JOB_CHANGED','The selected job is no longer a high-fit match. Search again.');
@@ -654,6 +669,38 @@ export function createService({store,mode='production',provider,dispatch,files,b
     const subjects=page.items.filter(row=>row.sk===row.value?.userSub&&validUserSub(row.value.userSub)).map(row=>row.value.userSub);
     let queued=0;for(let index=0;index<subjects.length;index+=20){await Promise.all(subjects.slice(index,index+20).map(async userSub=>{await dispatch({kind:'recommendation-refresh',userSub});queued++;}));}
     if(page.nextAfter)await dispatch({kind:'recommendation-fanout',after:page.nextAfter});
+    return {queued,continued:Boolean(page.nextAfter)};
+  }
+  async function reconcileBillingForCustomer(userSub,customerId){
+    if(!validUserSub(userSub)||!validBillingCustomerId(customerId))throw Error('Invalid billing reconciliation identity');
+    if(!billing?.reconcile)throw Error('Billing reconciliation is unavailable');
+    const pk=`USER#${userSub}`;
+    const [mapping,tombstone,deleting,entitlement]=await Promise.all([
+      store.get(BILLING_CUSTOMER_REGISTRY_PK,customerId),
+      store.get('ACCOUNT#deleted',tombstoneKey(userSub)),
+      store.get(pk,'DELETING'),
+      store.get(pk,'ENTITLEMENT'),
+    ]);
+    if(tombstone||deleting)return {reconciled:false,skipped:true,reason:'ACCOUNT_DELETED'};
+    if(mapping?.value?.userSub!==userSub||entitlement?.value?.customerId!==customerId)throw Error('Billing reconciliation ownership mismatch');
+    await billing.reconcile(userSub,store);
+    return {reconciled:true};
+  }
+  async function queueBillingReconciliations({after=null}={}){
+    if(typeof dispatch!=='function')throw Error('Billing reconciliation queue is unavailable');
+    if(after!==null&&!validBillingCustomerId(after))throw Error('Invalid billing reconciliation cursor');
+    const page=store.listPage
+      ?await store.listPage(BILLING_CUSTOMER_REGISTRY_PK,'',{after,limit:BILLING_RECONCILIATION_PAGE_SIZE})
+      :{items:(await store.list(BILLING_CUSTOMER_REGISTRY_PK)).filter(row=>after===null||row.sk>after).slice(0,BILLING_RECONCILIATION_PAGE_SIZE),nextAfter:null};
+    const customers=page.items.map(row=>{
+      if(!validBillingCustomerId(row.sk)||!validUserSub(row.value?.userSub))throw Error('Invalid billing customer registry record');
+      return {customerId:row.sk,userSub:row.value.userSub};
+    });
+    let queued=0;
+    for(let index=0;index<customers.length;index+=20){
+      await Promise.all(customers.slice(index,index+20).map(async ({customerId,userSub})=>{await dispatch({kind:'billing-reconcile',customerId,userSub});queued++;}));
+    }
+    if(page.nextAfter)await dispatch({kind:'billing-fanout',after:page.nextAfter});
     return {queued,continued:Boolean(page.nextAfter)};
   }
   async function importOpportunity(user,input){
@@ -1019,6 +1066,10 @@ export function createService({store,mode='production',provider,dispatch,files,b
         if(tombstone)return;
         const checkout=await store.get(pk,'CHECKOUT'),checkoutLock=await store.get(pk,'CHECKOUT_LOCK');
         const uploadState=await store.get(pk,'UPLOAD_STATE');
+        const customerId=entitlement?.value?.customerId;
+        if(customerId&&!validBillingCustomerId(customerId))throw Error('Invalid billing customer identity');
+        const customerMapping=customerId?await store.get(BILLING_CUSTOMER_REGISTRY_PK,customerId):null;
+        if(customerMapping?.value?.userSub!==undefined&&customerMapping.value.userSub!==user.sub)throw Error('Billing customer ownership mismatch');
         if(uploadState?.value.activeGrantUntil>Date.now())fail(409,'UPLOAD_GRANT_ACTIVE','A recent upload link is still active. Wait up to seven minutes after starting your latest upload before deleting your account.');
         const checkoutVerified=Boolean(checkout?.value.sessionId&&billingDeletion&&billingDeletion.pending===false
           &&billingDeletion.checkoutRevision===checkout.revision&&billingDeletion.sessionId===checkout.value.sessionId);
@@ -1033,10 +1084,12 @@ export function createService({store,mode='production',provider,dispatch,files,b
           {pk,sk:'ENTITLEMENT',expected:entitlement?.revision??0,checkOnly:true},
           {pk,sk:'CHECKOUT',expected:checkout?.revision??0,checkOnly:true},
           {pk,sk:'CHECKOUT_LOCK',expected:checkoutLock?.revision??0,checkOnly:true},
-          {pk,sk:'UPLOAD_STATE',expected:uploadState?.revision??0,checkOnly:true}
+          {pk,sk:'UPLOAD_STATE',expected:uploadState?.revision??0,checkOnly:true},
+          ...(customerMapping?[{pk:BILLING_CUSTOMER_REGISTRY_PK,sk:customerId,expected:customerMapping.revision,remove:true}]:[]),
         ]);
       });
     }
+    await removeBillingRegistrationsForSub(user.sub);
     await removeRecommendationRegistration(user.sub);
     await removeGenerationRegistrationsForSub(user.sub);
     const guestPartitions=[...new Set((await store.list(pk,'GUEST_CLAIM#')).map(row=>{
@@ -1051,5 +1104,5 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(identity)await identity.remove(user.identityUsername??user.sub);
     return {deleted:true};
   }
-  return {assertActive:user=>assertActive(pkOf(user)),capabilities,account,completeContinuation,saveProfile,uploadResume,startUpload,finalizeUpload,startGuest,readGuest,guestResume,saveGuestProfile,searchGuest,ignoreGuest,claimGuest,abandonGuest,opportunities,refreshOpportunities,refreshRecommendationsForSub,queueRecommendationRefreshes,repairPendingGenerations,importOpportunity,decision,applications,updateApplication,generate,generationResult,runGeneration,editLetter,checkout,portal,refreshBilling,exportAccount,deleteAccount,webhook:async(raw,sig)=>{if(!billing)fail(503,'SERVICE_UNAVAILABLE','Billing is unavailable.');return billing.webhook(raw,sig,store);}};
+  return {assertActive:user=>assertActive(pkOf(user)),capabilities,account,completeContinuation,saveProfile,uploadResume,startUpload,finalizeUpload,startGuest,readGuest,guestResume,saveGuestProfile,searchGuest,ignoreGuest,claimGuest,abandonGuest,opportunities,refreshOpportunities,refreshRecommendationsForSub,queueRecommendationRefreshes,reconcileBillingForCustomer,queueBillingReconciliations,repairPendingGenerations,importOpportunity,decision,applications,updateApplication,generate,generationResult,runGeneration,editLetter,checkout,portal,refreshBilling,exportAccount,deleteAccount,webhook:async(raw,sig)=>{if(!billing)fail(503,'SERVICE_UNAVAILABLE','Billing is unavailable.');return billing.webhook(raw,sig,store);}};
 }

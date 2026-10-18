@@ -119,7 +119,7 @@ test("unpaid confirmation does not display an active paid allowance", () => {
 test("ended subscribers can restart or access Stripe records while active subscribers only manage", () => {
   const ended = account({ ...free, status: "canceled", subscriptionStatus: "canceled", canManageBilling: true });
   assert.match(ended, /View cover-letter plans/);
-  assert.match(ended, /View billing history/);
+  assert.match(ended, /Open Stripe billing portal/);
   const dialog = upgrade(paid);
   assert.match(dialog, /47 generations available/);
   assert.match(dialog, /Manage subscription/);

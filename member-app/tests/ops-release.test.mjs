@@ -84,6 +84,8 @@ test('the canonical site digest covers every release file except its self-refere
 test('deployment binds an origin-gate phase and enables stack termination protection before execution', () => {
   const source = readFileSync(new URL('../scripts/deploy-production.mjs', import.meta.url), 'utf8');
   assert.match(source, /ROLECLUE_API_ORIGIN_GATE_ENABLED/);
+  assert.match(source, /\['StripePortalConfigurationId', stripePortalConfigurationId\]/);
+  assert.match(source, /plannedParameters\.get\('StripePortalConfigurationId'\) === stripePortalConfigurationId/);
   assert.match(source, /gate-\(\?:off\|on\)/);
   assert.match(source, /update-termination-protection', '--enable-termination-protection/);
   assert.ok(source.indexOf('update-termination-protection') < source.indexOf("'execute-change-set'"));
@@ -167,6 +169,8 @@ test('paid generations and recommendation refreshes select separate queues', () 
   assert.equal(workQueueUrl({ kind: 'generation-repair-fanout' }, env), env.GENERATION_QUEUE_URL);
   assert.equal(workQueueUrl({ kind: 'recommendation-refresh' }, env), env.RECOMMENDATION_QUEUE_URL);
   assert.equal(workQueueUrl({ kind: 'recommendation-fanout' }, env), env.RECOMMENDATION_QUEUE_URL);
+  assert.equal(workQueueUrl({ kind: 'billing-reconcile' }, env), env.RECOMMENDATION_QUEUE_URL);
+  assert.equal(workQueueUrl({ kind: 'billing-fanout' }, env), env.RECOMMENDATION_QUEUE_URL);
   assert.throws(() => workQueueUrl({ kind: 'unknown' }, env), /Unsupported async work kind/);
 });
 

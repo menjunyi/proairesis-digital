@@ -24,7 +24,7 @@ const guestSourceIp=(event,incoming,originSecret)=>{
 };
 export function workQueueUrl(payload,env){
   if(['generate','generation-repair-fanout'].includes(payload?.kind))return env.GENERATION_QUEUE_URL;
-  if(['recommendation-refresh','recommendation-fanout'].includes(payload?.kind))return env.RECOMMENDATION_QUEUE_URL;
+  if(['recommendation-refresh','recommendation-fanout','billing-reconcile','billing-fanout'].includes(payload?.kind))return env.RECOMMENDATION_QUEUE_URL;
   throw Error('Unsupported async work kind');
 }
 const decodePathId=value=>{
@@ -52,6 +52,12 @@ export async function processGenerationBatch(service,event){
       }else if(payload?.kind==='generation-repair-fanout'){
         if(Object.keys(payload).sort().join(',')!=='cursor,kind'||typeof payload.cursor!=='string'||payload.cursor.length<1||payload.cursor.length>2048||!/^[A-Za-z0-9_-]+$/.test(payload.cursor))throw Error('Invalid generation repair fanout message');
         await processGenerationRepair(service,{cursor:payload.cursor});
+      }else if(payload?.kind==='billing-reconcile'){
+        if(Object.keys(payload).sort().join(',')!=='customerId,kind,userSub'||!validSub||typeof payload.customerId!=='string'||payload.customerId.length>80||!/^cus_[A-Za-z0-9]+$/.test(payload.customerId))throw Error('Invalid billing reconciliation message');
+        await service.reconcileBillingForCustomer(payload.userSub,payload.customerId);
+      }else if(payload?.kind==='billing-fanout'){
+        if(Object.keys(payload).sort().join(',')!=='after,kind'||typeof payload.after!=='string'||payload.after.length>80||!/^cus_[A-Za-z0-9]+$/.test(payload.after))throw Error('Invalid billing fanout message');
+        await service.queueBillingReconciliations({after:payload.after});
       }else throw Error('Invalid work message');
     }catch(error){
       if(typeof record.messageId!=='string'||!record.messageId)throw error;
@@ -67,15 +73,23 @@ export async function processGenerationRepair(service,{cursor=null,log=console.e
   const result=await service.repairPendingGenerations({cursor});
   for(const failure of result.failures)log(JSON.stringify({event:'generation_dispatch_repair_failed',...failure}));
   for(const pending of result.reconciliationRequired)log(JSON.stringify({event:'generation_reconciliation_required',source:'scheduled-repair',...pending}));
+  log(JSON.stringify({event:'generation_repair_completed',examined:result.examined??0,requeued:result.requeued??0,continued:result.continued===true}));
   return result;
 }
 
-export async function processDailyRefresh(service,feed){
+export async function processDailyRefresh(service,feed,log=console.log){
   let feedResult,feedError;
   try{feedResult=await feed.refresh();}catch(error){feedError=error;}
   const recommendations=await service.queueRecommendationRefreshes();
   if(feedError)throw feedError;
+  log(JSON.stringify({event:'daily_refresh_completed',queued:recommendations.queued??0,continued:recommendations.continued===true}));
   return {feed:feedResult,recommendations};
+}
+
+export async function processDailyBillingReconciliation(service,log=console.log){
+  const result=await service.queueBillingReconciliations();
+  log(JSON.stringify({event:'daily_billing_reconciliation_completed',queued:result.queued??0,continued:result.continued===true}));
+  return result;
 }
 
 export function processAiAuthorityReview(log=console.log){
@@ -174,6 +188,10 @@ export async function handler(event){
   if(event?.kind==='generation-repair'){
     if(Object.keys(event).join(',')!=='kind')throw Error('Invalid generation repair event');
     return processGenerationRepair(r.service);
+  }
+  if(event?.kind==='billing-reconciliation'){
+    if(Object.keys(event).join(',')!=='kind')throw Error('Invalid billing reconciliation event');
+    return processDailyBillingReconciliation(r.service);
   }
   if(event?.kind==='feed-refresh')return processDailyRefresh(r.service,r.feed);
   return r.http(event);

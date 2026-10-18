@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiOriginRequestPolicyId, appTemplate, artifactTemplate } from '../infra/template.mjs';
+import { apiOriginRequestPolicyId, appTemplate, artifactTemplate, stripePortalConfigurationId } from '../infra/template.mjs';
 
 test('production is authenticated by default, with only bounded guest intake, health and signed Stripe callbacks public', () => {
   const routes = Object.values(appTemplate().Resources).filter(r => r.Type === 'AWS::ApiGatewayV2::Route');
@@ -22,18 +22,28 @@ test('production never defaults to demo, paid models or unapproved feeds', () =>
   assert.equal(template.Parameters.GoogleSignInEnabled.Default, 'false');
   assert.equal(template.Parameters.StripePriceId.Default, '');
   assert.equal(template.Parameters.StripeStarterPriceId.Default, '');
+  assert.equal(template.Parameters.StripePortalConfigurationId.Default, stripePortalConfigurationId);
+  assert.equal(stripePortalConfigurationId, 'bpc_1UPYkS2M7eo9K7BomH1dfiZp');
   assert.equal(template.Resources.Function.Properties.Environment.Variables.NODE_ENV, 'production');
   assert.equal(template.Resources.Function.Properties.Environment.Variables.ROLECLUE_LOCAL_DEMO, undefined);
   assert.equal(template.Resources.Function.Properties.Environment.Variables.AI_BUDGET_NAMESPACE, 'SYSTEM#ROLECLUE_AI');
   assert.deepEqual(template.Resources.Function.Properties.Environment.Variables.STRIPE_PRICE_ID, {Ref: 'StripePriceId'});
   assert.deepEqual(template.Resources.Function.Properties.Environment.Variables.STRIPE_STARTER_PRICE_ID, {Ref: 'StripeStarterPriceId'});
+  assert.deepEqual(template.Resources.Function.Properties.Environment.Variables.STRIPE_PORTAL_CONFIGURATION_ID, {Ref: 'StripePortalConfigurationId'});
   assert.equal(template.Resources.UserPoolClient.Properties.GenerateSecret, false);
   assert.deepEqual(template.Resources.UserPoolClient.Properties.AllowedOAuthFlows, ['code']);
   assert.equal(template.Resources.UserPoolClient.Properties.RefreshTokenValidity, 30);
+  assert.deepEqual(template.Resources.UserPool.Properties.EmailConfiguration, {
+    EmailSendingAccount: 'DEVELOPER',
+    SourceArn: { 'Fn::Sub': 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/proairesis.digital' },
+    From: 'RoleClue <hello@proairesis.digital>',
+    ReplyToEmailAddress: 'support@proairesis.digital',
+  });
   assert.equal(template.Resources.GoogleIdentityProvider.Condition, 'GoogleSignInEnabled');
   assert.match(template.Resources.GoogleIdentityProvider.Properties.ProviderDetails.client_secret['Fn::Sub'], /ssm-secure/);
   assert.equal(template.Resources.Function.Properties.ReservedConcurrentExecutions, undefined);
-  assert.equal(template.Resources.Stage.Properties.DefaultRouteSettings.ThrottlingRateLimit, 5);
+  assert.equal(template.Resources.Stage.Properties.DefaultRouteSettings.ThrottlingRateLimit, 25);
+  assert.equal(template.Resources.Stage.Properties.DefaultRouteSettings.ThrottlingBurstLimit, 50);
   assert.deepEqual(template.Resources.Stage.Properties.AccessLogSettings.DestinationArn, {
     'Fn::Sub': 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogs}',
   });
@@ -59,6 +69,13 @@ test('daily refresh is timezone-aware and async work has isolated bounded queues
   assert.equal(r.GenerationRepair.Properties.Target.Input, JSON.stringify({kind:'generation-repair'}));
   assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, { Ref: 'FunctionAlias' });
   assert.deepEqual(r.GenerationRepair.Properties.Target.RetryPolicy, { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 });
+  assert.deepEqual(r.DailyRefresh.Properties.Target.DeadLetterConfig, { Arn: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } });
+  assert.deepEqual(r.GenerationRepair.Properties.Target.DeadLetterConfig, { Arn: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } });
+  assert.equal(r.BillingReconciliation.Properties.ScheduleExpression, 'cron(15 4 * * ? *)');
+  assert.equal(r.BillingReconciliation.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
+  assert.equal(r.BillingReconciliation.Properties.Target.Input, JSON.stringify({kind:'billing-reconciliation'}));
+  assert.deepEqual(r.BillingReconciliation.Properties.Target.RetryPolicy, { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 });
+  assert.deepEqual(r.BillingReconciliation.Properties.Target.DeadLetterConfig, { Arn: { 'Fn::GetAtt': ['FailedWork', 'Arn'] } });
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpression, 'at(2026-11-04T09:00:00)');
   assert.equal(r.AiAuthorityReview.Properties.ScheduleExpressionTimezone, 'Australia/Sydney');
   assert.equal(r.GenerationQueue.Type, 'AWS::SQS::Queue');
@@ -106,6 +123,7 @@ test('production deployment is immutable and alarms have an operator destination
   assert.deepEqual(r.ScheduleRole.Properties.Policies[0].PolicyDocument.Statement[0].Resource, aliasArn);
   assert.deepEqual(r.DailyRefresh.Properties.Target.Arn, aliasArn);
   assert.deepEqual(r.GenerationRepair.Properties.Target.Arn, aliasArn);
+  assert.deepEqual(r.BillingReconciliation.Properties.Target.Arn, aliasArn);
   assert.deepEqual(r.AiAuthorityReview.Properties.Target.Arn, aliasArn);
   assert.deepEqual(r.GenerationQueueMapping.Properties.FunctionName, aliasArn);
   assert.deepEqual(r.RecommendationQueueMapping.Properties.FunctionName, aliasArn);
@@ -124,13 +142,19 @@ test('production deployment is immutable and alarms have an operator destination
   };
   visit(template);
   assert.deepEqual(invalidAliasArnReferences, []);
-  for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'AiAuthorityReviewAlarm']) {
+  for (const name of ['FailedWorkAlarm', 'GenerationQueueAgeAlarm', 'GenerationQueueBacklogAlarm', 'RecommendationQueueAgeAlarm', 'RecommendationQueueBacklogAlarm', 'LambdaErrorAlarm', 'LambdaThrottleAlarm', 'ApiServerErrorAlarm', 'DynamoThrottleAlarm', 'ReconciliationAlarm', 'GenerationRepairFailureAlarm', 'AiAuthorityReviewAlarm', 'DailyRefreshHeartbeatAlarm', 'BillingReconciliationHeartbeatAlarm', 'GenerationRepairHeartbeatAlarm']) {
     assert.deepEqual(r[name].Properties.AlarmActions, [{ Ref: 'AlarmTopic' }]);
   }
   assert.equal(r.ReconciliationMetric.Properties.FilterPattern, '"generation_reconciliation_required"');
   assert.equal(r.GenerationRepairFailureMetric.Properties.FilterPattern, '"generation_dispatch_repair_failed"');
   assert.equal(r.AiAuthorityReviewMetric.Properties.FilterPattern, '"ai_authority_review_required"');
   assert.equal(r.GenerationRepairFailureAlarm.Properties.MetricName, 'GenerationDispatchRepairFailed');
+  assert.equal(r.DailyRefreshHeartbeatAlarm.Properties.MetricName, 'DailyRefreshCompleted');
+  assert.equal(r.DailyRefreshHeartbeatAlarm.Properties.DatapointsToAlarm, 6);
+  assert.equal(r.BillingReconciliationHeartbeatAlarm.Properties.MetricName, 'DailyBillingReconciliationCompleted');
+  assert.equal(r.GenerationRepairHeartbeatAlarm.Properties.MetricName, 'GenerationRepairCompleted');
+  assert.equal(r.GenerationRepairHeartbeatAlarm.Properties.Period, 300);
+  assert.equal(r.GenerationRepairHeartbeatAlarm.Properties.DatapointsToAlarm, 6);
   assert.equal(r.GenerationQueueAgeAlarm.Properties.MetricName, 'ApproximateAgeOfOldestMessage');
   assert.equal(r.GenerationQueueBacklogAlarm.Properties.MetricName, 'ApproximateNumberOfMessagesVisible');
   assert.deepEqual(r.GenerationQueueAgeAlarm.Properties.Dimensions, [{ Name: 'QueueName', Value: { 'Fn::GetAtt': ['GenerationQueue', 'QueueName'] } }]);
@@ -168,6 +192,8 @@ test('runtime can authorize transactional condition checks and expires raw resum
   assert.deepEqual(queue.Resource, [{ 'Fn::GetAtt': ['GenerationQueue', 'Arn'] }, { 'Fn::GetAtt': ['RecommendationQueue', 'Arn'] }]);
   const asyncFailure=statements.find(s=>s.Action.length===1&&s.Action[0]==='sqs:SendMessage');
   assert.deepEqual(asyncFailure.Resource, { 'Fn::GetAtt': ['FailedWork', 'Arn'] });
+  const schedulerStatements=r.ScheduleRole.Properties.Policies[0].PolicyDocument.Statement;
+  assert.deepEqual(schedulerStatements[1],{Effect:'Allow',Action:['sqs:SendMessage'],Resource:{'Fn::GetAtt':['FailedWork','Arn']}});
   assert.deepEqual(r.Function.Properties.Environment.Variables.RECOMMENDATION_QUEUE_URL, { Ref: 'RecommendationQueue' });
   assert.deepEqual(appTemplate().Outputs.RecommendationQueueUrl.Value, { Ref: 'RecommendationQueue' });
   assert.equal(r.Table.Properties.TimeToLiveSpecification.AttributeName, 'ttl');

@@ -171,10 +171,30 @@ export async function createFiles(bucket,dependencies={}){
 }
 
 export async function createBilling(env,dependencies={}){
-  if(!env.STRIPE_SECRET_KEY_PARAM||!env.STRIPE_WEBHOOK_SECRET_PARAM||!env.STRIPE_PRICE_ID||!env.STRIPE_STARTER_PRICE_ID)return null;
+  if(!env.STRIPE_SECRET_KEY_PARAM||!env.STRIPE_WEBHOOK_SECRET_PARAM||!env.STRIPE_PRICE_ID||!env.STRIPE_STARTER_PRICE_ID
+    ||!/^bpc_[A-Za-z0-9]+$/.test(env.STRIPE_PORTAL_CONFIGURATION_ID??''))return null;
   const {default:Stripe}=await import('stripe');let client=dependencies.client;
   const stripe=async()=>client??=new Stripe(await secret(env.STRIPE_SECRET_KEY_PARAM),{apiVersion:'2026-09-30.endive',maxNetworkRetries:1,timeout:10000});
   const objectId=value=>typeof value==='string'?value:value?.id;
+  const exactArray=(value,expected)=>Array.isArray(value)&&value.length===expected.length&&value.every((item,index)=>item===expected[index]);
+  function validPortalConfiguration(config){
+    const site=String(env.SITE_URL??'').replace(/\/+$/,'');
+    const features=config?.features,cancel=features?.subscription_cancel,update=features?.subscription_update;
+    return Boolean(site)&&config?.id===env.STRIPE_PORTAL_CONFIGURATION_ID&&config.active===true
+      &&typeof config.livemode==='boolean'&&(env.NODE_ENV!=='production'||config.livemode===true)
+      &&config.default_return_url===`${site}/`
+      &&config.business_profile?.privacy_policy_url===`${site}/privacy.html`
+      &&config.business_profile?.terms_of_service_url===`${site}/terms.html`
+      &&features?.customer_update?.enabled===false&&exactArray(features.customer_update.allowed_updates,[])
+      &&features?.invoice_history?.enabled===true
+      &&features?.payment_method_update?.enabled===true&&features.payment_method_update.payment_method_configuration===null
+      &&cancel?.enabled===true&&cancel.mode==='at_period_end'&&cancel.proration_behavior==='none'
+      &&cancel.cancellation_reason?.enabled===false&&exactArray(cancel.cancellation_reason.feedback_options,[])
+      &&exactArray(cancel.cancellation_reason.options,['too_expensive','missing_features','switched_service','unused','other'])
+      &&update?.enabled===false&&update.billing_cycle_anchor==='unchanged'&&update.proration_behavior==='none'
+      &&exactArray(update.default_allowed_updates,[])&&exactArray(update.schedule_at_period_end?.conditions,[])
+      &&update.trial_update_behavior==='end_trial';
+  }
   async function listAll(list,params){
     const result=[];let after;
     for(let page=0;page<10;page++){
@@ -199,7 +219,7 @@ export async function createBilling(env,dependencies={}){
   }
   function validStarterLineItems(session){
     const items=session.line_items?.data;
-    return Array.isArray(items)&&items.length===1&&objectId(items[0].price)===env.STRIPE_STARTER_PRICE_ID&&items[0].quantity===1;
+    return Array.isArray(items)&&items.length===1&&session.line_items?.has_more===false&&objectId(items[0].price)===env.STRIPE_STARTER_PRICE_ID&&items[0].quantity===1;
   }
   function validCheckoutOffer(session,plan,userSub,customerId){
     const priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;
@@ -222,7 +242,8 @@ export async function createBilling(env,dependencies={}){
     const session=await s.checkout.sessions.retrieve(id,{expand:['line_items.data.price','payment_intent.latest_charge']});
     if(session.id!==id||session.mode!=='payment'||session.status!=='complete'||session.payment_status!=='paid'
       ||objectId(session.customer)!==customerId||session.client_reference_id!==userSub
-      ||session.currency!=='aud'||session.amount_total!==100||session.metadata?.roleclue_plan!=='starter'
+      ||session.currency!=='aud'||session.amount_subtotal!==100||session.amount_total!==100||session.automatic_tax?.enabled!==false
+      ||session.total_details?.amount_discount!==0||session.total_details?.amount_shipping!==0||session.total_details?.amount_tax!==0||session.metadata?.roleclue_plan!=='starter'
       ||session.metadata?.roleclue_user_id!==userSub||session.metadata?.roleclue_price_id!==env.STRIPE_STARTER_PRICE_ID
       ||session.metadata?.roleclue_offer!=='starter-aud1-2-lifetime-v1'||session.metadata?.terms_version!==TERMS_VERSION
       ||!validStarterLineItems(session))return null;
@@ -232,6 +253,8 @@ export async function createBilling(env,dependencies={}){
       ||paymentIntent.metadata?.roleclue_plan!=='starter'||paymentIntent.metadata?.roleclue_user_id!==userSub
       ||paymentIntent.metadata?.roleclue_price_id!==env.STRIPE_STARTER_PRICE_ID
       ||paymentIntent.metadata?.roleclue_offer!=='starter-aud1-2-lifetime-v1'||paymentIntent.metadata?.terms_version!==TERMS_VERSION)return null;
+    if(!charge||objectId(charge.customer)!==customerId||charge.currency!=='aud'||charge.amount!==100||charge.amount_captured!==100
+      ||charge.paid!==true||charge.status!=='succeeded'||charge.captured!==true||objectId(charge.payment_intent)!==paymentIntent.id)return null;
     return {sessionId:session.id,purchaseId:paymentIntent.id,created:session.created??0,status:charge?.disputed===true?'disputed':charge?.refunded===true?'refunded':'active'};
   }
   async function findStarter(s,e,userSub,customerId){
@@ -456,12 +479,14 @@ export async function createBilling(env,dependencies={}){
   },
   async portal(user,store){
     const e=(await store.get(`USER#${user.sub}`,'ENTITLEMENT'))?.value;if(!e?.customerId)throw new HttpError(404,'NOT_FOUND','No billing account is available.');
-    const s=await stripe(),session=await s.billingPortal.sessions.create({customer:e.customerId,return_url:`${env.SITE_URL}/?billing=return#account`});return {url:session.url};
+    const s=await stripe(),configuration=await s.billingPortal.configurations.retrieve(env.STRIPE_PORTAL_CONFIGURATION_ID);
+    if(!validPortalConfiguration(configuration))throw unavailable('Billing management is not configured safely.');
+    const session=await s.billingPortal.sessions.create({customer:e.customerId,configuration:env.STRIPE_PORTAL_CONFIGURATION_ID,return_url:`${env.SITE_URL}/?billing=return#account`});return {url:session.url};
   },
   async webhook(raw,signature,store){
     const s=await stripe();let event;
     try{event=s.webhooks.constructEvent(raw,signature,dependencies.webhookSecret??await secret(env.STRIPE_WEBHOOK_SECRET_PARAM));}catch{throw new HttpError(400,'INVALID_SIGNATURE','Invalid webhook signature.');}
-    if(!['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired','customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','invoice.paid','invoice.payment_failed','invoice.payment_action_required','invoice.finalization_failed','charge.refunded','refund.created','refund.updated','refund.failed','charge.dispute.created'].includes(event.type))return {received:true};
+    if(!['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired','customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','invoice.paid','invoice.payment_failed','invoice.payment_action_required','invoice.finalization_failed','charge.refunded','refund.created','refund.updated','refund.failed','charge.dispute.created','charge.dispute.updated','charge.dispute.closed','charge.dispute.funds_reinstated','charge.dispute.funds_withdrawn'].includes(event.type))return {received:true};
     const object=event.data.object;let customer=objectId(object.customer);
     if(!customer&&object.charge){const charge=await s.charges.retrieve(objectId(object.charge));customer=objectId(charge.customer);}
     if(!customer&&object.payment_intent){const intent=await s.paymentIntents.retrieve(objectId(object.payment_intent));customer=objectId(intent.customer);}

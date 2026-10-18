@@ -28,7 +28,9 @@
     "release:deploy": "node scripts/deploy-production.mjs --execute-existing",
     "release:rollback": "node scripts/rollback-production.mjs",
     "smoke:cloud": "node scripts/smoke-cloud.mjs",
-    "smoke:browser": "node scripts/smoke-browser.mjs"
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "smoke:signup": "node scripts/smoke-signup.mjs",
+    "smoke:load": "node scripts/smoke-load.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1149.0",

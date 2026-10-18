@@ -6,7 +6,7 @@ import Stripe from 'stripe';
 import {SSMClient,GetParameterCommand,PutParameterCommand} from '@aws-sdk/client-ssm';
 import {createBilling} from '../server/adapters.mjs';
 import {MemoryStore,change} from '../server/store.mjs';
-import {blankEntitlement,billingView,createService} from '../server/service.mjs';
+import {blankEntitlement,billingView,createService,TERMS_VERSION} from '../server/service.mjs';
 
 const ACCOUNT='037169690315',REGION='ap-southeast-2',PROFILE='proairesis-management';
 const STRIPE_ACCOUNT='acct_1UPXnSRvysAJPVoo';
@@ -15,6 +15,10 @@ const CONFIG_PARAM='/roleclue/member-app/sandbox/billing-config';
 const execFileAsync=promisify(execFile);
 const check=(condition,code)=>{if(!condition)throw Object.assign(new Error(code),{code});};
 const safeId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(value)?value:undefined;
+export const monthlySandboxOfferMetadata=(runId,userSub,priceId)=>({
+  app:'roleclue',synthetic_test:'true',run_id:runId,roleclue_user_id:userSub,roleclue_plan:'monthly',
+  roleclue_price_id:priceId,roleclue_offer:'monthly-aud20-50-v2',terms_version:TERMS_VERSION,
+});
 export function argumentsFor(argv){
   const result={command:'inspect'};
   for(let i=0;i<argv.length;i++){
@@ -77,14 +81,14 @@ async function fixture(context,customer,userSub){
   const store=new MemoryStore(),user={sub:userSub};
   const entitlement={...blankEntitlement(),customerId:customer.id};
   await store.transact([change(`USER#${userSub}`,'ENTITLEMENT',null,entitlement),change('BILLING#customers',customer.id,null,{userSub})]);
-  const billing=await createBilling({STRIPE_SECRET_KEY_PARAM:KEY_PARAM,STRIPE_WEBHOOK_SECRET_PARAM:'sandbox-not-used-by-reconciliation',STRIPE_PRICE_ID:context.config.priceId,STRIPE_STARTER_PRICE_ID:context.config.starterPriceId,SITE_URL:'http://localhost:3002'},{client:context.stripe});
+  const billing=await createBilling({NODE_ENV:'test',STRIPE_SECRET_KEY_PARAM:KEY_PARAM,STRIPE_WEBHOOK_SECRET_PARAM:'sandbox-not-used-by-reconciliation',STRIPE_PRICE_ID:context.config.priceId,STRIPE_STARTER_PRICE_ID:context.config.starterPriceId,STRIPE_PORTAL_CONFIGURATION_ID:context.config.portalConfigurationId,SITE_URL:'http://localhost:3002'},{client:context.stripe});
   const service=createService({store,billing,feed:{async status(){return {status:'unconfigured'};}},provider:{available:()=>false}});
   const reconcile=async()=>{await billing.reconcile(userSub,store);return billingView((await store.get(`USER#${userSub}`,'ENTITLEMENT')).value);};
   return {store,user,billing,service,reconcile};
 }
 
 async function checkout(context,runId){
-  const {stripe,save}=context;check(context.config.priceId&&context.config.starterPriceId,'SETUP_REQUIRED');
+  const {stripe,save}=context;check(context.config.priceId&&context.config.starterPriceId&&context.config.portalConfigurationId,'SETUP_REQUIRED');
   const userSub=`roleclue-sandbox-hosted-${runId}`;
   const previous=context.config.hostedCheckout;
   if(previous?.runId===runId&&previous.sessionId){
@@ -117,20 +121,22 @@ async function waitClock(stripe,id){
 }
 
 async function validate(context,runId,progress){
-  const {stripe,save}=context;check(context.config.priceId&&context.config.starterPriceId,'SETUP_REQUIRED');
+  const {stripe,save}=context;check(context.config.priceId&&context.config.starterPriceId&&context.config.portalConfigurationId,'SETUP_REQUIRED');
   check(!(context.config.validation?.runId===runId&&context.config.validation?.completedAt),'RUN_ALREADY_COMPLETE');
   const previous=context.config.validation?.runId===runId?context.config.validation:null;
   const frozenTime=previous?.frozenTime??Math.floor(Date.now()/1000);
   check(Number.isSafeInteger(frozenTime),'RUN_STATE_INVALID');
   await save({...context.config,validation:{...previous,runId,frozenTime,checks:previous?.checks??[]}});
   const metadata={app:'roleclue',synthetic_test:'true',run_id:runId};
+  const offerMetadata=userSub=>monthlySandboxOfferMetadata(runId,userSub,context.config.priceId);
   const clock=await stripe.testHelpers.testClocks.create({frozen_time:frozenTime,name:`RoleClue synthetic ${runId}`},{idempotencyKey:`roleclue-clock-${runId}`});
   await save({...context.config,validation:{...previous,runId,frozenTime,clockId:clock.id,checks:previous?.checks??[]}});
-  const customer=await stripe.customers.create({name:'RoleClue synthetic lifecycle QA',test_clock:clock.id,payment_method:'pm_card_visa',invoice_settings:{default_payment_method:'pm_card_visa'},metadata},{idempotencyKey:`roleclue-customer-${runId}`});
+  const lifecycleUserSub=`roleclue-sandbox-lifecycle-${runId}`;
+  const customer=await stripe.customers.create({name:'RoleClue synthetic lifecycle QA',test_clock:clock.id,payment_method:'pm_card_visa',invoice_settings:{default_payment_method:'pm_card_visa'},metadata:{...metadata,roleclue_user_id:lifecycleUserSub}},{idempotencyKey:`roleclue-customer-${runId}`});
   check(customer.livemode===false,'CUSTOMER_SCOPE');
-  let subscription=await stripe.subscriptions.create({customer:customer.id,items:[{price:context.config.priceId,quantity:1}],payment_behavior:'error_if_incomplete',collection_method:'charge_automatically',metadata},{idempotencyKey:`roleclue-subscription-${runId}`});
+  let subscription=await stripe.subscriptions.create({customer:customer.id,items:[{price:context.config.priceId,quantity:1}],payment_behavior:'error_if_incomplete',collection_method:'charge_automatically',metadata:offerMetadata(lifecycleUserSub)},{idempotencyKey:`roleclue-subscription-${runId}`});
   check(subscription.livemode===false,'SUBSCRIPTION_SCOPE');
-  const f=await fixture(context,customer,`roleclue-sandbox-lifecycle-${runId}`),evidence={...previous,runId,frozenTime,clockId:clock.id,customerId:customer.id,subscriptionId:subscription.id,checks:previous?.checks??[]};
+  const f=await fixture(context,customer,lifecycleUserSub),evidence={...previous,runId,frozenTime,clockId:clock.id,customerId:customer.id,subscriptionId:subscription.id,checks:previous?.checks??[]};
   const done=name=>evidence.checks.includes(name);
   const record=async name=>{if(!done(name))evidence.checks.push(name);await save({...context.config,validation:evidence});progress({check:name,status:'passed'});};
   let view=await f.reconcile();
@@ -167,14 +173,15 @@ async function validate(context,runId,progress){
   }
   if(!done('refunded_subscription_blocks_account_deletion')){await assert.rejects(f.service.deleteAccount(f.user,{confirmation:'DELETE'}),error=>error.code==='CANCEL_SUBSCRIPTION_FIRST');await record('refunded_subscription_blocks_account_deletion');}
   if(!done('ended_subscription_removes_access')){await stripe.subscriptions.cancel(subscription.id,{invoice_now:false,prorate:false},{idempotencyKey:`roleclue-end-refunded-${runId}`});view=await f.reconcile();assert.equal(view.hasSubscription,false);await record('ended_subscription_removes_access');}
-  const failureCustomer=await stripe.customers.create({name:'RoleClue synthetic declined-payment QA',metadata},{idempotencyKey:`roleclue-declined-customer-empty-${runId}`});
-  const failedSubscription=await stripe.subscriptions.create({customer:failureCustomer.id,items:[{price:context.config.priceId,quantity:1}],payment_behavior:'default_incomplete',collection_method:'charge_automatically',metadata},{idempotencyKey:`roleclue-declined-subscription-empty-${runId}`});
+  const failureUserSub=`roleclue-sandbox-declined-${runId}`;
+  const failureCustomer=await stripe.customers.create({name:'RoleClue synthetic declined-payment QA',metadata:{...metadata,roleclue_user_id:failureUserSub}},{idempotencyKey:`roleclue-declined-customer-empty-${runId}`});
+  const failedSubscription=await stripe.subscriptions.create({customer:failureCustomer.id,items:[{price:context.config.priceId,quantity:1}],payment_behavior:'default_incomplete',collection_method:'charge_automatically',metadata:offerMetadata(failureUserSub)},{idempotencyKey:`roleclue-declined-subscription-empty-${runId}`});
   check(failedSubscription.livemode===false,'SUBSCRIPTION_SCOPE');
   const failedPayments=await stripe.invoicePayments.list({invoice:failedSubscription.latest_invoice,limit:100});
   const failedIntent=failedPayments.data.find(payment=>payment.payment?.payment_intent)?.payment.payment_intent;
   check(typeof failedIntent==='string','DECLINED_PAYMENT_NOT_FOUND');
   await assert.rejects(stripe.paymentIntents.confirm(failedIntent,{payment_method:'pm_card_chargeDeclined',return_url:'http://localhost:3002/'},{idempotencyKey:`roleclue-confirm-decline-${runId}`}),error=>error.code==='card_declined');
-  const failedFixture=await fixture(context,failureCustomer,`roleclue-sandbox-declined-${runId}`);
+  const failedFixture=await fixture(context,failureCustomer,failureUserSub);
   const failureView=await failedFixture.reconcile();assert.equal(failureView.canGenerate,false);assert.notEqual(failureView.plan,'monthly');await record('failed_initial_payment_grants_no_paid_access');
   await stripe.subscriptions.cancel(failedSubscription.id,{invoice_now:false,prorate:false},{idempotencyKey:`roleclue-end-declined-${runId}`});
   evidence.failureCustomerId=failureCustomer.id;evidence.failureSubscriptionId=failedSubscription.id;evidence.completedAt=new Date().toISOString();evidence.syntheticSubscriptionsEnded=true;
@@ -186,7 +193,21 @@ export async function main(argv=process.argv.slice(2),deps={}){
   const options=argumentsFor(argv);
   if(options.help)return {help:'Sandbox only: inspect (read-only), setup --apply, validate --apply --run-id UNIQUE_ID, checkout --apply --run-id UNIQUE_ID. Exact AWS/Stripe/key/account guards; no production app mutation, live money or AI calls. Results are stored privately in the approved sandbox billing-config parameter.'};
   const context=await connect(deps);
-  if(options.command==='inspect')return {sandboxVerified:true,awsAccount:ACCOUNT,stripeAccount:STRIPE_ACCOUNT,configPresent:Boolean(context.config.priceId&&context.config.starterPriceId),chargesEnabled:context.account.charges_enabled,termsUrlConfigured:Boolean(context.account.settings?.checkout?.terms_of_service_url),productId:context.config.productId,priceId:context.config.priceId,starterProductId:context.config.starterProductId,starterPriceId:context.config.starterPriceId,portalConfigurationId:context.config.portalConfigurationId};
+  if(options.command==='inspect')return {
+    sandboxVerified:true,awsAccount:ACCOUNT,stripeAccount:STRIPE_ACCOUNT,
+    configPresent:Boolean(context.config.priceId&&context.config.starterPriceId&&context.config.portalConfigurationId),
+    chargesEnabled:context.account.charges_enabled,
+    termsUrlConfigured:Boolean(context.account.settings?.checkout?.terms_of_service_url),
+    productId:context.config.productId,priceId:context.config.priceId,
+    starterProductId:context.config.starterProductId,starterPriceId:context.config.starterPriceId,
+    portalConfigurationId:context.config.portalConfigurationId,
+    validation:context.config.validation?{
+      runId:context.config.validation.runId,
+      completedAt:context.config.validation.completedAt,
+      checks:context.config.validation.checks??[],
+      syntheticSubscriptionsEnded:context.config.validation.syntheticSubscriptionsEnded===true,
+    }:null,
+  };
   if(options.command==='setup')return setup(context);
   if(options.command==='checkout')return checkout(context,options.runId);
   return validate(context,options.runId,deps.progress??(value=>process.stdout.write(`${JSON.stringify(value)}\n`)));

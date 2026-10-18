@@ -16,6 +16,7 @@ const assumeRole = (service) => ({ Version: '2012-10-17', Statement: [{ Effect: 
 const statement = (Action, Resource) => ({ Effect: 'Allow', Action, Resource });
 const s3TlsDeny = (bucket) => ({ Sid: 'RequireTLS', Effect: 'Deny', Principal: '*', Action: 's3:*', Resource: [get(bucket, 'Arn'), sub('${' + bucket + '.Arn}/*')], Condition: { Bool: { 'aws:SecureTransport': false } } });
 export const apiOriginRequestPolicyId = 'b689b0a8-53d0-40ab-baf2-68738e2966ac';
+export const stripePortalConfigurationId = 'bpc_1UPYkS2M7eo9K7BomH1dfiZp';
 
 export function certificateTemplate() {
   return {
@@ -58,6 +59,7 @@ export function appTemplate() {
       FunctionName: { Type: 'String', Default: 'roleclue-member-app' },
       StripePriceId: { Type: 'String', Default: '' },
       StripeStarterPriceId: { Type: 'String', Default: '' },
+      StripePortalConfigurationId: { Type: 'String', Default: stripePortalConfigurationId, AllowedPattern: '^bpc_[A-Za-z0-9]+$' },
       OpenAIModel: { Type: 'String', Default: '' },
       OpenAIDailyCallLimit: { Type: 'Number', Default: 0, MinValue: 0 },
       OpenAIDailyTokenLimit: { Type: 'Number', Default: 0, MinValue: 0 },
@@ -103,7 +105,12 @@ export function appTemplate() {
     UsernameConfiguration: { CaseSensitive: false },
     Policies: { PasswordPolicy: { MinimumLength: 12, RequireLowercase: true, RequireUppercase: true, RequireNumbers: true, RequireSymbols: false, TemporaryPasswordValidityDays: 1 } },
     AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
-    EmailConfiguration: { EmailSendingAccount: 'COGNITO_DEFAULT' },
+    EmailConfiguration: {
+      EmailSendingAccount: 'DEVELOPER',
+      SourceArn: sub('arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/proairesis.digital'),
+      From: 'RoleClue <hello@proairesis.digital>',
+      ReplyToEmailAddress: 'support@proairesis.digital',
+    },
     VerificationMessageTemplate: { DefaultEmailOption: 'CONFIRM_WITH_CODE' },
     Schema: [{ Name: 'email', Required: true, Mutable: true }, { Name: 'name', Required: false, Mutable: true }],
     UserAttributeUpdateSettings: { AttributesRequireVerificationBeforeUpdate: ['email'] },
@@ -171,7 +178,7 @@ export function appTemplate() {
       COGNITO_USER_POOL_ID: ref('UserPool'), COGNITO_CLIENT_ID: ref('UserPoolClient'),
       ALLOWED_ORIGINS: sub('https://${Hostname}'), SITE_URL: sub('https://${Hostname}'),
       API_ORIGIN_SECRET: { 'Fn::If': ['EnforceApiOriginGate', sub('{{resolve:secretsmanager:${ApiOriginSecret}:SecretString}}'), ''] },
-      STRIPE_SECRET_KEY_PARAM: `${secretPrefix}stripe-secret-key`, STRIPE_WEBHOOK_SECRET_PARAM: `${secretPrefix}stripe-webhook-secret`, STRIPE_PRICE_ID: ref('StripePriceId'), STRIPE_STARTER_PRICE_ID: ref('StripeStarterPriceId'),
+      STRIPE_SECRET_KEY_PARAM: `${secretPrefix}stripe-secret-key`, STRIPE_WEBHOOK_SECRET_PARAM: `${secretPrefix}stripe-webhook-secret`, STRIPE_PRICE_ID: ref('StripePriceId'), STRIPE_STARTER_PRICE_ID: ref('StripeStarterPriceId'), STRIPE_PORTAL_CONFIGURATION_ID: ref('StripePortalConfigurationId'),
       OPENAI_API_KEY_PARAM: `${secretPrefix}openai-api-key`, OPENAI_MODEL: ref('OpenAIModel'), OPENAI_DAILY_CALL_LIMIT: ref('OpenAIDailyCallLimit'), OPENAI_DAILY_TOKEN_LIMIT: ref('OpenAIDailyTokenLimit'), OPENAI_MAX_OUTPUT_TOKENS: '1200',
       AI_BUDGET_NAMESPACE: 'SYSTEM#ROLECLUE_AI',
       JOB_FEED_URL: ref('JobFeedUrl'), JOB_FEED_LICENSE_APPROVED: ref('JobFeedLicenseApproved'), JOB_FEED_LICENSE_REFERENCE: ref('JobFeedLicenseReference'), JOB_FEED_SOURCES_JSON: ref('JobFeedSourcesJson'), JOB_FEED_MAX_AGE_HOURS: '48',
@@ -205,12 +212,13 @@ export function appTemplate() {
   for (const [name, routeKey] of Object.entries({GuestStartRoute:'POST /api/guest/start',GuestResumeRoute:'POST /api/guest/resume',GuestProfileRoute:'PUT /api/guest/profile',GuestProfilePostRoute:'POST /api/guest/profile',GuestSearchRoute:'POST /api/guest/search',GuestSessionRoute:'POST /api/guest/session',GuestIgnoreRoute:'POST /api/guest/ignore'})) {
     r[name] = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: routeKey, Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });
   }
-  r.Stage = resource('AWS::ApiGatewayV2::Stage', { ApiId: ref('Api'), StageName: '$default', AutoDeploy: true, DefaultRouteSettings: { ThrottlingBurstLimit: 10, ThrottlingRateLimit: 5 }, AccessLogSettings: { DestinationArn: sub('arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogs}'), Format: JSON.stringify({ requestId: '$context.requestId', route: '$context.routeKey', status: '$context.status', latencyMs: '$context.responseLatency' }) } });
+  r.Stage = resource('AWS::ApiGatewayV2::Stage', { ApiId: ref('Api'), StageName: '$default', AutoDeploy: true, DefaultRouteSettings: { ThrottlingBurstLimit: 50, ThrottlingRateLimit: 25 }, AccessLogSettings: { DestinationArn: sub('arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogs}'), Format: JSON.stringify({ requestId: '$context.requestId', route: '$context.routeKey', status: '$context.status', latencyMs: '$context.responseLatency' }) } });
   r.InvokePermission = resource('AWS::Lambda::Permission', { FunctionName: ref('FunctionAlias'), Action: 'lambda:InvokeFunction', Principal: 'apigateway.amazonaws.com', SourceArn: sub('arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*') });
-  r.ScheduleRole = resource('AWS::IAM::Role', { AssumeRolePolicyDocument: assumeRole('scheduler.amazonaws.com'), Policies: [{ PolicyName: 'InvokeOnlyRoleClueSchedules', PolicyDocument: { Version: '2012-10-17', Statement: [statement(['lambda:InvokeFunction'], ref('FunctionAlias'))] } }] });
-  r.DailyRefresh = resource('AWS::Scheduler::Schedule', { Description: 'RoleClue daily authorised job refresh', ScheduleExpression: 'cron(0 6 * * ? *)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'feed-refresh' }), RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 3600 } } });
-  r.GenerationRepair = resource('AWS::Scheduler::Schedule', { Description: 'Recover paid generation dispatches without browser activity', ScheduleExpression: 'rate(5 minutes)', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'generation-repair' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 } } });
-  r.AiAuthorityReview = resource('AWS::Scheduler::Schedule', { Description: 'Notify operators before the pinned RoleClue AI price authority expires', ScheduleExpression: 'at(2026-11-04T09:00:00)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'ai-authority-review' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 } } });
+  r.ScheduleRole = resource('AWS::IAM::Role', { AssumeRolePolicyDocument: assumeRole('scheduler.amazonaws.com'), Policies: [{ PolicyName: 'InvokeOnlyRoleClueSchedules', PolicyDocument: { Version: '2012-10-17', Statement: [statement(['lambda:InvokeFunction'], ref('FunctionAlias')),statement(['sqs:SendMessage'],get('FailedWork','Arn'))] } }] });
+  r.DailyRefresh = resource('AWS::Scheduler::Schedule', { Description: 'RoleClue daily authorised job refresh', ScheduleExpression: 'cron(0 6 * * ? *)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'feed-refresh' }), RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 3600 }, DeadLetterConfig: { Arn: get('FailedWork','Arn') } } });
+  r.GenerationRepair = resource('AWS::Scheduler::Schedule', { Description: 'Recover paid generation dispatches without browser activity', ScheduleExpression: 'rate(5 minutes)', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'generation-repair' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 300 }, DeadLetterConfig: { Arn: get('FailedWork','Arn') } } });
+  r.BillingReconciliation = resource('AWS::Scheduler::Schedule', { Description: 'Reconcile RoleClue billing without customer browser activity', ScheduleExpression: 'cron(15 4 * * ? *)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'billing-reconciliation' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }, DeadLetterConfig: { Arn: get('FailedWork','Arn') } } });
+  r.AiAuthorityReview = resource('AWS::Scheduler::Schedule', { Description: 'Notify operators before the pinned RoleClue AI price authority expires', ScheduleExpression: 'at(2026-11-04T09:00:00)', ScheduleExpressionTimezone: 'Australia/Sydney', FlexibleTimeWindow: { Mode: 'OFF' }, Target: { Arn: ref('FunctionAlias'), RoleArn: get('ScheduleRole', 'Arn'), Input: JSON.stringify({ kind: 'ai-authority-review' }), RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }, DeadLetterConfig: { Arn: get('FailedWork','Arn') } } });
   r.OriginAccess = resource('AWS::CloudFront::OriginAccessControl', { OriginAccessControlConfig: { Name: sub('${AWS::StackName}-s3'), OriginAccessControlOriginType: 's3', SigningBehavior: 'always', SigningProtocol: 'sigv4' } });
   r.SecurityHeaders = resource('AWS::CloudFront::ResponseHeadersPolicy', { ResponseHeadersPolicyConfig: {
     Name: sub('${AWS::StackName}-security'), SecurityHeadersConfig: {
@@ -247,6 +255,12 @@ export function appTemplate() {
   r.GenerationRepairFailureAlarm = resource('AWS::CloudWatch::Alarm', { AlarmDescription: 'A paid generation dispatch could not be repaired automatically', Namespace: 'RoleClue', MetricName: 'GenerationDispatchRepairFailed', Statistic: 'Sum', Period: 300, EvaluationPeriods: 1, Threshold: 0, ComparisonOperator: 'GreaterThanThreshold', TreatMissingData: 'notBreaching', AlarmActions: alarmActions });
   r.AiAuthorityReviewMetric = resource('AWS::Logs::MetricFilter', { LogGroupName: ref('LogGroup'), FilterPattern: '"ai_authority_review_required"', MetricTransformations: [{ MetricNamespace: 'RoleClue', MetricName: 'AiAuthorityReviewRequired', MetricValue: '1', DefaultValue: 0 }] });
   r.AiAuthorityReviewAlarm = resource('AWS::CloudWatch::Alarm', { AlarmDescription: 'Review RoleClue AI pricing and renew its bounded authority before expiry', Namespace: 'RoleClue', MetricName: 'AiAuthorityReviewRequired', Statistic: 'Sum', Period: 300, EvaluationPeriods: 1, Threshold: 0, ComparisonOperator: 'GreaterThanThreshold', TreatMissingData: 'notBreaching', AlarmActions: alarmActions });
+  r.DailyRefreshHeartbeatMetric = resource('AWS::Logs::MetricFilter', { LogGroupName: ref('LogGroup'), FilterPattern: '"daily_refresh_completed"', MetricTransformations: [{ MetricNamespace: 'RoleClue', MetricName: 'DailyRefreshCompleted', MetricValue: '1', DefaultValue: 0 }] });
+  r.DailyRefreshHeartbeatAlarm = resource('AWS::CloudWatch::Alarm', { AlarmDescription: 'RoleClue daily recommendation refresh has not completed for 36 hours', Namespace: 'RoleClue', MetricName: 'DailyRefreshCompleted', Statistic: 'Maximum', Period: 21600, EvaluationPeriods: 6, DatapointsToAlarm: 6, Threshold: 1, ComparisonOperator: 'LessThanThreshold', TreatMissingData: 'breaching', AlarmActions: alarmActions });
+  r.BillingReconciliationHeartbeatMetric = resource('AWS::Logs::MetricFilter', { LogGroupName: ref('LogGroup'), FilterPattern: '"daily_billing_reconciliation_completed"', MetricTransformations: [{ MetricNamespace: 'RoleClue', MetricName: 'DailyBillingReconciliationCompleted', MetricValue: '1', DefaultValue: 0 }] });
+  r.BillingReconciliationHeartbeatAlarm = resource('AWS::CloudWatch::Alarm', { AlarmDescription: 'RoleClue daily billing reconciliation has not completed for 36 hours', Namespace: 'RoleClue', MetricName: 'DailyBillingReconciliationCompleted', Statistic: 'Maximum', Period: 21600, EvaluationPeriods: 6, DatapointsToAlarm: 6, Threshold: 1, ComparisonOperator: 'LessThanThreshold', TreatMissingData: 'breaching', AlarmActions: alarmActions });
+  r.GenerationRepairHeartbeatMetric = resource('AWS::Logs::MetricFilter', { LogGroupName: ref('LogGroup'), FilterPattern: '"generation_repair_completed"', MetricTransformations: [{ MetricNamespace: 'RoleClue', MetricName: 'GenerationRepairCompleted', MetricValue: '1', DefaultValue: 0 }] });
+  r.GenerationRepairHeartbeatAlarm = resource('AWS::CloudWatch::Alarm', { AlarmDescription: 'RoleClue paid-generation repair has not completed for 30 minutes', Namespace: 'RoleClue', MetricName: 'GenerationRepairCompleted', Statistic: 'Maximum', Period: 300, EvaluationPeriods: 6, DatapointsToAlarm: 6, Threshold: 1, ComparisonOperator: 'LessThanThreshold', TreatMissingData: 'breaching', AlarmActions: alarmActions });
   t.Outputs = {
     SiteUrl: { Value: sub('https://${Hostname}') }, SiteBucket: { Value: ref('SiteBucket') }, ResumeBucket: { Value: ref('ResumeBucket') },
     TableName: { Value: ref('Table') }, DistributionId: { Value: ref('Distribution') }, DistributionDomain: { Value: get('Distribution', 'DomainName') }, ApiUrl: { Value: get('Api', 'ApiEndpoint') },
@@ -255,7 +269,7 @@ export function appTemplate() {
     CognitoHostedDomain: { Condition: 'GoogleSignInEnabled', Value: sub('https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com') },
     GenerationQueueUrl: { Value: ref('GenerationQueue') }, RecommendationQueueUrl: { Value: ref('RecommendationQueue') }, FailedWorkQueueUrl: { Value: ref('FailedWork') }, AlarmTopicArn: { Value: ref('AlarmTopic') },
     GenerationQueueArn: { Value: get('GenerationQueue', 'Arn') }, RecommendationQueueArn: { Value: get('RecommendationQueue', 'Arn') }, FailedWorkQueueArn: { Value: get('FailedWork', 'Arn') },
-    DailyRefreshScheduleName: { Value: ref('DailyRefresh') }, GenerationRepairScheduleName: { Value: ref('GenerationRepair') }, AiAuthorityReviewScheduleName: { Value: ref('AiAuthorityReview') },
+    DailyRefreshScheduleName: { Value: ref('DailyRefresh') }, GenerationRepairScheduleName: { Value: ref('GenerationRepair') }, BillingReconciliationScheduleName: { Value: ref('BillingReconciliation') }, AiAuthorityReviewScheduleName: { Value: ref('AiAuthorityReview') },
     LogGroupName: { Value: ref('LogGroup') },
   };
   return t;

@@ -7,13 +7,24 @@ import {createHttpHandler} from '../server/handler.mjs';
 import {MemoryStore,change} from '../server/store.mjs';
 
 const user={sub:'alice',email:'alice@example.test'};
-const env={STRIPE_SECRET_KEY_PARAM:'synthetic',STRIPE_WEBHOOK_SECRET_PARAM:'synthetic',STRIPE_PRICE_ID:'price_twenty_v2',STRIPE_STARTER_PRICE_ID:'price_starter',SITE_URL:'https://app.example.test'};
+const env={NODE_ENV:'production',STRIPE_SECRET_KEY_PARAM:'synthetic',STRIPE_WEBHOOK_SECRET_PARAM:'synthetic',STRIPE_PRICE_ID:'price_twenty_v2',STRIPE_STARTER_PRICE_ID:'price_starter',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_roleclue',SITE_URL:'https://app.example.test'};
 const now=Math.floor(Date.now()/1000);
 const monthlyMetadata={roleclue_user_id:'alice',roleclue_plan:'monthly',roleclue_price_id:env.STRIPE_PRICE_ID,roleclue_offer:'monthly-aud20-50-v2',terms_version:TERMS_VERSION};
 const subscription=()=>({id:'sub_alice',customer:'cus_alice',currency:'aud',created:now-100,status:'active',cancel_at_period_end:false,metadata:monthlyMetadata,items:{data:[{price:{id:env.STRIPE_PRICE_ID},quantity:1,current_period_start:now-100,current_period_end:now+86400}]},latest_invoice:'in_current'});
 const price=()=>({id:env.STRIPE_PRICE_ID,active:true,currency:'aud',unit_amount:2000,recurring:{interval:'month',interval_count:1,usage_type:'licensed'}});
 const starterPrice=()=>({id:env.STRIPE_STARTER_PRICE_ID,active:true,currency:'aud',unit_amount:100,recurring:null});
 const event=type=>JSON.stringify({id:'evt_synthetic',type,data:{object:{customer:'cus_alice',metadata:{roleclue_user_id:'mallory'}}}});
+const disputeEvent=type=>JSON.stringify({id:`evt_${type}`,type,data:{object:{id:'dp_synthetic',charge:'ch_current'}}});
+const portalConfiguration=()=>({
+  id:env.STRIPE_PORTAL_CONFIGURATION_ID,active:true,is_default:true,livemode:true,default_return_url:'https://app.example.test/',
+  business_profile:{privacy_policy_url:'https://app.example.test/privacy.html',terms_of_service_url:'https://app.example.test/terms.html'},
+  features:{
+    customer_update:{allowed_updates:[],enabled:false},invoice_history:{enabled:true},
+    payment_method_update:{enabled:true,payment_method_configuration:null},
+    subscription_cancel:{cancellation_reason:{enabled:false,feedback_options:[],options:['too_expensive','missing_features','switched_service','unused','other']},enabled:true,mode:'at_period_end',proration_behavior:'none'},
+    subscription_update:{billing_cycle_anchor:'unchanged',default_allowed_updates:[],enabled:false,proration_behavior:'none',schedule_at_period_end:{conditions:[]},trial_update_behavior:'end_trial'},
+  },
+});
 
 function monthlyInvoice(sub,id='in_current'){
   const item=sub.items.data.find(candidate=>candidate.price.id===env.STRIPE_PRICE_ID)??sub.items.data[0],start=item.current_period_start,end=item.current_period_end;
@@ -27,7 +38,7 @@ function monthlyInvoice(sub,id='in_current'){
 async function fixture(overrides={}){
   const store=new MemoryStore(),entitlement={...blankEntitlement(),customerId:'cus_alice',subscriptionId:'sub_alice',status:'active',free:{used:1,reserved:0},paid:{key:`sub_alice:${now-100}`,used:7,reserved:0}};
   await store.transact([change('USER#alice','ENTITLEMENT',null,entitlement),change('BILLING#customers','cus_alice',null,{userSub:'alice'})]);
-  const state={sub:subscription(),invoice:{},payments:[],charge:{id:'ch_current',customer:'cus_alice',currency:'aud',amount:2000,amount_captured:2000,paid:true,status:'succeeded',captured:true,refunded:false,disputed:false,payment_intent:'pi_current'},intent:{id:'pi_current',customer:'cus_alice',currency:'aud',amount:2000,amount_received:2000,status:'succeeded',latest_charge:'ch_current'},checkout:[],expired:[],portals:[],prices:price()};
+  const state={sub:subscription(),invoice:{},payments:[],charge:{id:'ch_current',customer:'cus_alice',currency:'aud',amount:2000,amount_captured:2000,paid:true,status:'succeeded',captured:true,refunded:false,disputed:false,payment_intent:'pi_current'},intent:{id:'pi_current',customer:'cus_alice',currency:'aud',amount:2000,amount_received:2000,status:'succeeded',latest_charge:'ch_current'},checkout:[],expired:[],portals:[],portalRetrievals:[],portalConfiguration:portalConfiguration(),prices:price()};
   state.payments=[{id:'inpay_current',status:'paid',invoice:'in_current',currency:'aud',amount_requested:2000,amount_paid:2000,payment:{type:'payment_intent',payment_intent:'pi_current'}}];
   const client={
     subscriptions:{async list(){return {data:state.sub?[state.sub]:[],has_more:false};},async retrieve(){return state.completedSub??state.sub;}},
@@ -37,7 +48,7 @@ async function fixture(overrides={}){
     invoices:{async retrieve(id){const currentId=typeof state.sub?.latest_invoice==='string'?state.sub.latest_invoice:state.sub?.latest_invoice?.id;return {...monthlyInvoice(state.sub,id),...(id===currentId?state.invoice:{}),...state.invoiceById?.[id]};},async list(){return {data:state.invoiceHistory??[],has_more:false};}},
     prices:{async retrieve(id){return id===env.STRIPE_STARTER_PRICE_ID?starterPrice():state.prices;}},
     checkout:{sessions:{async list(){return {data:[],has_more:false};},async create(params,options){state.checkout.push({params,options});return {id:'cs_synthetic',url:'https://checkout.stripe.com/synthetic',expires_at:params.expires_at,automatic_tax:params.automatic_tax};},async expire(id){state.expired.push(id);return {id,status:'expired'};},async retrieve(){return {id:'cs_synthetic',mode:'subscription',customer:'cus_alice',client_reference_id:'alice',status:state.checkoutStatus??'open',expires_at:now+3600,subscription:state.checkoutSubscriptionId??'sub_alice',automatic_tax:{enabled:false},metadata:{roleclue_plan:'monthly',roleclue_price_id:env.STRIPE_PRICE_ID,terms_version:TERMS_VERSION},line_items:{data:[{price:{id:env.STRIPE_PRICE_ID},quantity:1}]}};}}},
-    billingPortal:{sessions:{async create(params){state.portals.push(params);return {url:'https://billing.stripe.com/synthetic'};}}},
+    billingPortal:{configurations:{async retrieve(id){state.portalRetrievals.push(id);return state.portalConfiguration;}},sessions:{async create(params){state.portals.push(params);return {url:'https://billing.stripe.com/synthetic'};}}},
     webhooks:{constructEvent(raw,signature){if(signature!=='valid')throw Error('Invalid');return JSON.parse(raw);}},
     ...overrides,
   };
@@ -46,9 +57,11 @@ async function fixture(overrides={}){
   return {store,state,billing,service,client};
 }
 
-test('billing stays disabled unless both fixed catalog prices are configured',async()=>{
+test('billing stays disabled unless both fixed catalog prices and the pinned portal are configured',async()=>{
   assert.equal(await createBilling({...env,STRIPE_STARTER_PRICE_ID:''}),null);
   assert.equal(await createBilling({...env,STRIPE_PRICE_ID:''}),null);
+  assert.equal(await createBilling({...env,STRIPE_PORTAL_CONFIGURATION_ID:''}),null);
+  assert.equal(await createBilling({...env,STRIPE_PORTAL_CONFIGURATION_ID:'invalid'}),null);
 });
 
 test('active subscription requires a verified paid invoice and retains usage while payment is pending',async()=>{
@@ -127,6 +140,22 @@ test('direct-charge full refunds are checked while partial refunds do not consum
   assert.equal(e.status,'refunded');assert.equal(e.paid.used,7);
 });
 
+test('every dispute lifecycle webhook immediately reconciles from canonical Stripe state',async t=>{
+  const cases=[
+    ['charge.dispute.updated',true,'disputed'],
+    ['charge.dispute.funds_withdrawn',true,'disputed'],
+    ['charge.dispute.closed',false,'active'],
+    ['charge.dispute.funds_reinstated',false,'active'],
+  ];
+  for(const [type,disputed,expected] of cases)await t.test(type,async()=>{
+    const {state,store,billing}=await fixture();state.charge.disputed=disputed;
+    const row=await store.get('USER#alice','ENTITLEMENT');
+    await store.transact([change(row.pk,row.sk,row,{...row.value,status:disputed?'active':'disputed'})]);
+    await billing.webhook(disputeEvent(type),'valid',store);
+    assert.equal((await store.get('USER#alice','ENTITLEMENT')).value.status,expected);
+  });
+});
+
 test('period-end cancellation retains current credit until canonical cancellation, and unpaid states cannot generate',async()=>{
   const {state,store,billing}=await fixture();
   state.sub.cancel_at_period_end=true;
@@ -172,7 +201,42 @@ test('checkout binds current terms and account returns, uses the server price an
   assert.deepEqual(params.line_items,[{price:env.STRIPE_PRICE_ID,quantity:1}]);assert.equal(params.customer,'cus_alice');
   assert.equal(params.success_url,'https://app.example.test/?checkout=success&plan=monthly#account');assert.equal(params.cancel_url,'https://app.example.test/?checkout=cancelled#account');
   assert.equal(options.idempotencyKey,'roleclue-checkout-v3-auto-tax-disabled-monthly-aud20-50-v2-fixed-synthetic-key');assert.notEqual(options.idempotencyKey,'roleclue-checkout-fixed-synthetic-key');assert.equal(params.consent_collection.terms_of_service,'required');assert.equal(params.payment_method_types,undefined);assert.equal(params.payment_method_collection,'always');assert.equal(params.subscription_data.trial_period_days,undefined);assert.deepEqual(params.automatic_tax,{enabled:false});assert.equal(params.line_items[0].tax_rates,undefined);assert.equal(params.subscription_data.default_tax_rates,undefined);assert.equal(params.allow_promotion_codes,false);assert.equal(params.discounts,undefined);
-  await billing.portal(user,store);assert.equal(state.portals[0].return_url,'https://app.example.test/?billing=return#account');
+  await billing.portal(user,store);
+  assert.deepEqual(state.portalRetrievals,[env.STRIPE_PORTAL_CONFIGURATION_ID]);
+  assert.equal(state.portals[0].configuration,env.STRIPE_PORTAL_CONFIGURATION_ID);
+  assert.equal(state.portals[0].return_url,'https://app.example.test/?billing=return#account');
+});
+
+test('billing portal fails closed when any pinned safety contract field drifts',async t=>{
+  const cases=[
+    ['identity',config=>{config.id='bpc_other';}],
+    ['active',config=>{config.active=false;}],
+    ['live mode',config=>{config.livemode=false;}],
+    ['return URL',config=>{config.default_return_url='https://example.test/';}],
+    ['privacy URL',config=>{config.business_profile.privacy_policy_url='https://example.test/privacy';}],
+    ['terms URL',config=>{config.business_profile.terms_of_service_url='https://example.test/terms';}],
+    ['customer update',config=>{config.features.customer_update.enabled=true;}],
+    ['customer fields',config=>{config.features.customer_update.allowed_updates=['email'];}],
+    ['invoice history',config=>{config.features.invoice_history.enabled=false;}],
+    ['payment methods',config=>{config.features.payment_method_update.enabled=false;}],
+    ['payment configuration',config=>{config.features.payment_method_update.payment_method_configuration='pmc_other';}],
+    ['cancellation disabled',config=>{config.features.subscription_cancel.enabled=false;}],
+    ['immediate cancellation',config=>{config.features.subscription_cancel.mode='immediately';}],
+    ['cancellation proration',config=>{config.features.subscription_cancel.proration_behavior='create_prorations';}],
+    ['cancellation reasons',config=>{config.features.subscription_cancel.cancellation_reason.enabled=true;}],
+    ['cancellation reason options',config=>{config.features.subscription_cancel.cancellation_reason.options=['other'];}],
+    ['subscription update',config=>{config.features.subscription_update.enabled=true;}],
+    ['billing-cycle change',config=>{config.features.subscription_update.billing_cycle_anchor='reset';}],
+    ['update proration',config=>{config.features.subscription_update.proration_behavior='create_prorations';}],
+    ['allowed subscription changes',config=>{config.features.subscription_update.default_allowed_updates=['price'];}],
+    ['scheduled subscription changes',config=>{config.features.subscription_update.schedule_at_period_end.conditions=['decreasing_item_amount'];}],
+    ['trial behavior',config=>{config.features.subscription_update.trial_update_behavior='continue_trial';}],
+  ];
+  for(const [name,mutate] of cases)await t.test(name,async()=>{
+    const {state,billing,store}=await fixture();mutate(state.portalConfiguration);
+    await assert.rejects(billing.portal(user,store),error=>error.status===503&&error.message==='Billing management is not configured safely.');
+    assert.equal(state.portals.length,0);
+  });
 });
 
 test('same-contract checkout retries keep one versioned Stripe idempotency key',async()=>{
@@ -365,15 +429,15 @@ async function starterFixture(){
   const store=new MemoryStore(),entitlement={...blankEntitlement(),customerId:'cus_starter'};
   await store.transact([change('USER#alice','ENTITLEMENT',null,entitlement),change('BILLING#customers','cus_starter',null,{userSub:'alice'})]);
   const starterMetadata={roleclue_plan:'starter',roleclue_user_id:'alice',roleclue_price_id:env.STRIPE_STARTER_PRICE_ID,roleclue_offer:'starter-aud1-2-lifetime-v1',terms_version:TERMS_VERSION};
-  const state={created:[],sessions:[],session:{},charge:{id:'ch_starter',customer:'cus_starter',refunded:false,disputed:false},intent:{id:'pi_starter',customer:'cus_starter',status:'succeeded',currency:'aud',amount:100,amount_received:100,metadata:starterMetadata,latest_charge:'ch_starter'}};
-  const fullSession=()=>({id:'cs_starter',mode:'payment',status:'complete',payment_status:state.intent.status==='succeeded'?'paid':'unpaid',customer:'cus_starter',client_reference_id:'alice',currency:'aud',amount_total:100,created:now,automatic_tax:{enabled:false},metadata:starterMetadata,line_items:{data:[{price:{id:env.STRIPE_STARTER_PRICE_ID},quantity:1}]},payment_intent:'pi_starter',expires_at:now+3600,...state.session});
+  const state={created:[],sessions:[],session:{},charge:{id:'ch_starter',customer:'cus_starter',currency:'aud',amount:100,amount_captured:100,paid:true,status:'succeeded',captured:true,payment_intent:'pi_starter',refunded:false,disputed:false},intent:{id:'pi_starter',customer:'cus_starter',status:'succeeded',currency:'aud',amount:100,amount_received:100,metadata:starterMetadata,latest_charge:'ch_starter'}};
+  const fullSession=()=>({id:'cs_starter',mode:'payment',status:'complete',payment_status:state.intent.status==='succeeded'?'paid':'unpaid',customer:'cus_starter',client_reference_id:'alice',currency:'aud',amount_subtotal:100,amount_total:100,total_details:{amount_discount:0,amount_shipping:0,amount_tax:0},created:now,automatic_tax:{enabled:false},metadata:starterMetadata,line_items:{data:[{price:{id:env.STRIPE_STARTER_PRICE_ID},quantity:1}],has_more:false},payment_intent:'pi_starter',expires_at:now+3600,...state.session});
   const client={
     subscriptions:{async list(){return {data:[],has_more:false};}},
     prices:{async retrieve(id){return id===env.STRIPE_STARTER_PRICE_ID?starterPrice():price();}},
     checkout:{sessions:{async list(){return {data:state.sessions.map(session=>({id:session.id,mode:session.mode,created:session.created,metadata:session.metadata})),has_more:false};},async retrieve(id){assert.equal(id,'cs_starter');return fullSession();},async create(params,options){state.created.push({params,options});return {id:'cs_starter',url:'https://checkout.stripe.com/starter',expires_at:params.expires_at,automatic_tax:params.automatic_tax};}}},
     paymentIntents:{async retrieve(){return {...state.intent,latest_charge:state.charge};}},
     charges:{async retrieve(){return state.charge;}},
-    billingPortal:{sessions:{async create(){return {url:'https://billing.stripe.com/starter'};}}},
+    billingPortal:{configurations:{async retrieve(){return portalConfiguration();}},sessions:{async create(){return {url:'https://billing.stripe.com/starter'};}}},
     webhooks:{constructEvent(raw,signature){if(signature!=='valid')throw Error('Invalid');return JSON.parse(raw);}},
   };
   const billing=await createBilling(env,{client,webhookSecret:'synthetic'});
@@ -408,6 +472,40 @@ test('a paid object with stale terms or mismatched provider metadata cannot gran
   const {state,store,billing}=await starterFixture();state.sessions=[{id:'cs_starter',mode:'payment',created:now,metadata:{roleclue_plan:'starter'}}];state.intent.metadata={...state.intent.metadata,terms_version:'old-terms'};
   await billing.reconcile(user.sub,store);
   const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);assert.equal(view.plan,'free');assert.equal(view.canGenerate,false);assert.equal(view.canPurchaseStarter,true);
+});
+
+test('Starter entitlement requires an exact successful captured A$1 Stripe charge',async t=>{
+  const cases=[
+    ['missing charge',state=>{state.charge=null;}],
+    ['foreign charge customer',state=>{state.charge.customer='cus_other';}],
+    ['wrong charge currency',state=>{state.charge.currency='usd';}],
+    ['wrong charge amount',state=>{state.charge.amount=99;}],
+    ['uncaptured charge',state=>{state.charge.captured=false;state.charge.amount_captured=0;}],
+    ['foreign PaymentIntent link',state=>{state.charge.payment_intent='pi_other';}],
+  ];
+  for(const [name,mutate] of cases)await t.test(name,async()=>{
+    const {state,store,billing}=await starterFixture();state.sessions=[{id:'cs_starter',mode:'payment',created:now,metadata:{roleclue_plan:'starter'}}];mutate(state);
+    await billing.reconcile(user.sub,store);
+    const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);
+    assert.equal(view.plan,'free');assert.equal(view.canGenerate,false);assert.equal(view.canPurchaseStarter,true);
+  });
+});
+
+test('Starter entitlement requires the exact tax-disabled undiscounted A$1 Checkout offer',async t=>{
+  const cases=[
+    ['automatic tax',state=>{state.session={automatic_tax:{enabled:true}};}],
+    ['wrong subtotal',state=>{state.session={amount_subtotal:90};}],
+    ['discount',state=>{state.session={total_details:{amount_discount:10,amount_shipping:0,amount_tax:0}};}],
+    ['tax',state=>{state.session={total_details:{amount_discount:0,amount_shipping:0,amount_tax:10}};}],
+    ['shipping',state=>{state.session={total_details:{amount_discount:0,amount_shipping:10,amount_tax:0}};}],
+    ['truncated line items',state=>{state.session={line_items:{data:[{price:{id:env.STRIPE_STARTER_PRICE_ID},quantity:1}],has_more:true}};}],
+  ];
+  for(const [name,mutate] of cases)await t.test(name,async()=>{
+    const {state,store,billing}=await starterFixture();state.sessions=[{id:'cs_starter',mode:'payment',created:now,metadata:{roleclue_plan:'starter'}}];mutate(state);
+    await billing.reconcile(user.sub,store);
+    const view=billingView((await store.get('USER#alice','ENTITLEMENT')).value);
+    assert.equal(view.plan,'free');assert.equal(view.canGenerate,false);assert.equal(view.canPurchaseStarter,true);
+  });
 });
 
 test('account deletion blocks every unsettled Starter PaymentIntent from canonical Stripe state',async t=>{

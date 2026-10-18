@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { CognitoIdentityProviderClient, SignUpCommand, ConfirmSignUpCommand, InitiateAuthCommand, AdminGetUserCommand, AdminDeleteUserCommand, ForgotPasswordCommand, ConfirmForgotPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
+import {verifyLiveRelease,writeSmokeEvidence} from './smoke-evidence.mjs';
 
 class SafeError extends Error {}
 
@@ -12,6 +13,8 @@ async function main() {
   if (!process.stdin.isTTY) throw new SafeError('A writable PTY is required; run with tty:true and terminal echo disabled.');
   const email = process.env.ROLECLUE_TEST_EMAIL?.trim().toLowerCase();
   if (!email || !/^[^\s@]+\+roleclue-qa-[a-z0-9-]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SafeError('Use a dedicated plus-address on a mailbox you control.');
+  const startedAt=new Date().toISOString(),checks=[];
+  const record=label=>checks.push({label,result:'passed'});
   const profile = 'proairesis-management', region = 'ap-southeast-2';
   const aws = (...args) => JSON.parse(execFileSync('aws', [...args, '--profile', profile, '--region', region, '--no-cli-pager', '--output', 'json'], {
     encoding: 'utf8', timeout: 45000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
@@ -26,6 +29,10 @@ async function main() {
   if (out.SiteUrl !== 'https://app.proairesis.digital') throw new SafeError('Unexpected deployment website.');
   const site = new URL(out.SiteUrl);
   if (!out.CognitoClientId || !out.CognitoUserPoolId?.startsWith('ap-southeast-2_')) throw new SafeError('Cognito stack outputs are missing.');
+  const cliKey=key=>key.replace(/[A-Z]/g,letter=>`-${letter.toLowerCase()}`);
+  const releaseAws=(service,operation,input={})=>aws(service,operation,...Object.entries(input).flatMap(([key,value])=>[`--${cliKey(key)}`,String(value)]));
+  const liveRelease=await verifyLiveRelease({aws:releaseAws,outputs:out,siteUrl:out.SiteUrl,check:(condition,message)=>{if(!condition)throw new SafeError(message);}});
+  record('deployed frontend and protected live Lambda release match');
   process.env.AWS_PROFILE = profile;
   const cognito = new CognitoIdentityProviderClient({ region, maxAttempts: 1 });
   const send = command => cognito.send(command, { abortSignal: AbortSignal.timeout(20000) });
@@ -99,6 +106,7 @@ async function main() {
     stage = 'password sign-in and private API';
     await verifySignIn(password);
     console.log(JSON.stringify({ check: 'delivered-email-confirmation-signin-private-api', passed: true }));
+    record('delivered confirmation email, confirmed account, signed in and accessed the private API');
     if (process.env.ROLECLUE_TEST_PASSWORD_RECOVERY === '1') {
       checkCancelled();
       stage = 'password-recovery email';
@@ -113,6 +121,7 @@ async function main() {
       stage = 'replacement-password sign-in and private API';
       await verifySignIn(replacement);
       console.log(JSON.stringify({ check: 'delivered-recovery-email-reset-signin-private-api', passed: true }));
+      record('delivered password-recovery email, reset password, signed in and accessed the private API');
     }
   } catch (error) {
     testError = error instanceof SafeError
@@ -145,6 +154,7 @@ async function main() {
       }
       created = false;
       console.log(JSON.stringify({ check: 'email-test-account-removed', passed: true }));
+      record('test account and application data removed through the public API');
     }
     if (created) {
       // Without a token this script has made no app-data writes. Delete only
@@ -154,6 +164,7 @@ async function main() {
       catch (error) { if (error.name !== 'UserNotFoundException') throw error; }
       created = false;
       console.log(JSON.stringify({ check: 'unconfirmed-test-identity-removed', passed: true }));
+      record('unconfirmed test identity removed');
     }
   } catch (error) {
     cleanupErrors.push(error);
@@ -182,6 +193,13 @@ async function main() {
   if (testError) throw testError;
   if (cleanupError) throw cleanupError;
   checkCancelled();
+  await writeSmokeEvidence('signup-smoke',{
+    startedAt,completedAt:new Date().toISOString(),account:'037169690315',region,stackId:stack.StackId,siteUrl:out.SiteUrl,
+    sourceRevision:liveRelease.manifest.sourceRevision,releaseId:liveRelease.manifest.releaseId,releaseCreatedAt:liveRelease.manifest.createdAt,
+    lambdaSha256:liveRelease.manifest.lambdaSha256,liveFunctionVersion:liveRelease.alias.FunctionVersion,liveAliasArn:liveRelease.alias.AliasArn,
+    mailbox:'controlled-plus-address-redacted',checks,
+  });
+  console.log(JSON.stringify({check:'signup-smoke-evidence',passed:true,path:'build/evidence/signup-smoke.json'}));
 }
 
 main().catch(error => {

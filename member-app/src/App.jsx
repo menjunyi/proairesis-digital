@@ -4198,7 +4198,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
           </button>
           {plan.canManageBilling && (
             <button className="text-link billing-history-link" disabled={busy} onClick={portal}>
-              View billing history in Stripe
+              Open the Stripe billing portal
               <ArrowUpRight size={14} />
             </button>
           )}
@@ -4398,7 +4398,7 @@ export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice,
                   <>
                     {plan.hasSubscription || plan.paid
                       ? "Manage subscription"
-                      : "View billing history"}
+                      : "Open Stripe billing portal"}
                     <ArrowUpRight size={17} />
                   </>
                 )}

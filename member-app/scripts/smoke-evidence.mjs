@@ -114,7 +114,7 @@ export async function verifyLiveRelease({
 }
 
 export async function writeSmokeEvidence(name, evidence) {
-  if (!new Set(["cloud-smoke", "browser-smoke"]).has(name))
+  if (!new Set(["cloud-smoke", "browser-smoke", "signup-smoke", "load-smoke"]).has(name))
     throw new Error("Unsupported smoke evidence name");
   const directory = resolve("build/evidence");
   await mkdir(directory, { recursive: true });

@@ -152,6 +152,17 @@ test('existing account can abandon a conflicting guest continuation without copy
   await assert.rejects(()=>service.ignoreGuest({token:started.token,jobId:id},sourceIp),error=>error.code==='GUEST_ALREADY_RESOLVED');
 });
 
+test('guest claim cannot overwrite matching resume text with different confirmed constraints',async()=>{
+  const {store,service}=await setup(),{started,saved}=await confirmedGuest(service),searched=await service.searchGuest({token:started.token},sourceIp);
+  const id=searched.opportunities[0].job.id;
+  const existing={...saved.profile,email:user.email,visaLimitations:'Existing account visa condition',preferences:{...saved.profile.preferences,limitations:'No weekend work'}};
+  await store.transact([change('USER#alice','PROFILE',null,existing)]);
+  await assert.rejects(()=>service.claimGuest(user,{token:started.token,interestedJobId:id},sourceIp),error=>error.code==='ACCOUNT_PROFILE_EXISTS');
+  assert.deepEqual((await store.get('USER#alice','PROFILE')).value,existing);
+  assert.equal(await store.get('USER#alice',`APP#${id}`),null);
+  assert.equal(await store.get('USER#alice','CONTINUATION'),null);
+});
+
 test('account deletion removes an abandoned guest resume partition',async()=>{
   const {store,service}=await setup(),{started,saved}=await confirmedGuest(service),searched=await service.searchGuest({token:started.token},sourceIp);
   const existing={...saved.profile,email:user.email,resumeText:'A different confirmed account resume.',location:'Melbourne, Australia',roleFamilies:['data']};

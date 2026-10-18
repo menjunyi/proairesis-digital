@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MemoryStore,change} from '../server/store.mjs';
 import {createService} from '../server/service.mjs';
-import {createHttpHandler,processAiAuthorityReview,processDailyRefresh,processGenerationBatch} from '../server/handler.mjs';
+import {createHttpHandler,processAiAuthorityReview,processDailyBillingReconciliation,processDailyRefresh,processGenerationBatch} from '../server/handler.mjs';
 import {normalizeJob} from '../server/matching.mjs';
 
 const alice={sub:'alice',email:'alice@example.test'},bob={sub:'bob',email:'bob@example.test'};
@@ -115,6 +115,20 @@ test('daily recommendation fanout is paginated and continues through SQS without
 test('daily scheduler still queues user refreshes when the legacy feed refresh fails',async()=>{
   const {service,queued}=await fixture();await service.account(alice);const brokenFeed={async refresh(){throw Error('legacy source failed');}};
   await assert.rejects(()=>processDailyRefresh(service,brokenFeed),/legacy source failed/);assert.deepEqual(queued,[{kind:'recommendation-refresh',userSub:'alice'}]);
+});
+
+test('daily workflows emit heartbeat logs only after successful fanout',async()=>{
+  const logs=[];
+  const recommendations={async refresh(){return {ok:true};}},service={
+    async queueRecommendationRefreshes(){return {queued:3,continued:false};},
+    async queueBillingReconciliations(){return {queued:2,continued:true};},
+  };
+  await processDailyRefresh(service,recommendations,value=>logs.push(value));
+  await processDailyBillingReconciliation(service,value=>logs.push(value));
+  assert.deepEqual(logs,[
+    '{"event":"daily_refresh_completed","queued":3,"continued":false}',
+    '{"event":"daily_billing_reconciliation_completed","queued":2,"continued":true}',
+  ]);
 });
 
 test('AI authority review emits the exact operational event without service initialization',()=>{

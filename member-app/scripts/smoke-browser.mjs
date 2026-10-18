@@ -11,6 +11,7 @@ import {
   DescribeUserPoolClientCommand,
   DescribeUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { stripePortalConfigurationId } from "../infra/template.mjs";
 import { syntheticResumePdf } from "./smoke-cloud.mjs";
 import { verifyLiveRelease, writeSmokeEvidence } from "./smoke-evidence.mjs";
 
@@ -712,6 +713,7 @@ export async function runBrowserSmoke(env = process.env) {
   check(
     Boolean(variables.STRIPE_PRICE_ID) &&
       Boolean(variables.STRIPE_STARTER_PRICE_ID) &&
+      variables.STRIPE_PORTAL_CONFIGURATION_ID === stripePortalConfigurationId &&
       Number(variables.OPENAI_DAILY_CALL_LIMIT) > 0 &&
       Number(variables.OPENAI_DAILY_TOKEN_LIMIT) > 0 &&
       variables.FREEHIRE_ENABLED === "true" &&
