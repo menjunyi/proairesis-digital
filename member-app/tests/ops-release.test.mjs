@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserAwsProfile, browserTarget, browserProgram } from '../scripts/smoke-browser.mjs';
-import { hashDirectory, isProtectedReleaseVersion, protectedReleaseVersion, requireSafeStatefulChanges, unsafeStatefulChanges } from '../scripts/release-safety.mjs';
+import { hashDirectory, isProtectedReleaseVersion, protectedReleaseVersion, requireSafeStatefulChanges, rollbackHasSkippedResources, unsafeStatefulChanges, updateReadyStackStatus } from '../scripts/release-safety.mjs';
 import { workQueueUrl } from '../server/handler.mjs';
 
 test('production change-set safety rejects removal or possible replacement of retained state', () => {
@@ -26,6 +26,24 @@ test('production change-set safety rejects removal or possible replacement of re
     { logicalResourceId: 'Table', action: 'Add' },
     { logicalResourceId: 'Function', action: 'Modify', replacement: 'True' },
   ]));
+});
+
+test('a completed update rollback is reusable only when no resources were skipped', () => {
+  assert.equal(updateReadyStackStatus('CREATE_COMPLETE'), true);
+  assert.equal(updateReadyStackStatus('UPDATE_COMPLETE'), true);
+  assert.equal(updateReadyStackStatus('UPDATE_ROLLBACK_COMPLETE'), true);
+  assert.equal(updateReadyStackStatus('UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS'), false);
+  assert.equal(updateReadyStackStatus('UPDATE_ROLLBACK_FAILED'), false);
+  assert.equal(rollbackHasSkippedResources({StackStatus:'UPDATE_ROLLBACK_COMPLETE'}, [
+    {LogicalResourceId:'FunctionAlias',ResourceStatus:'UPDATE_COMPLETE'},
+  ]), false);
+  assert.equal(rollbackHasSkippedResources({
+    StackStatus:'UPDATE_ROLLBACK_COMPLETE',
+    StackStatusReason:'One or more resources were skipped during UpdateRollback.',
+  }), true);
+  assert.equal(rollbackHasSkippedResources({StackStatus:'UPDATE_ROLLBACK_COMPLETE'}, [
+    {LogicalResourceId:'Table',ResourceStatus:'UPDATE_COMPLETE',ResourceStatusReason:'Resource skipped during UpdateRollback'},
+  ]), true);
 });
 
 test('emergency rollback accepts only fully pinned gate-on releases', () => {
@@ -83,6 +101,9 @@ test('deployment binds an origin-gate phase and enables stack termination protec
   assert.match(source, /fetchVerifiedArtifact/);
   assert.match(source, /siteContentSha256/);
   assert.match(source, /Set ROLECLUE_API_ORIGIN_GATE_ENABLED explicitly/);
+  assert.match(source, /updateReadyStackStatus\(stack\.StackStatus\)/);
+  assert.match(source, /rollbackHasSkippedResources\(stack, resources\)/);
+  assert.match(source, /protectedStack\?\.StackId === stack\.StackId && updateReadyStackStatus\(protectedStack\.StackStatus\)/);
   assert.match(source, /\['AVAILABLE', 'EXECUTE_COMPLETE'\]\.includes\(planned\.ExecutionStatus\)/);
   assert.match(source, /if \(planned\.ExecutionStatus === 'AVAILABLE'\)/);
   assert.match(source, /deployedParameters\.get\(key\) === plannedParameters\.get\(key\)/);

@@ -14,6 +14,16 @@ export const STATEFUL_LOGICAL_RESOURCE_IDS = Object.freeze([
 ]);
 
 const statefulIds = new Set(STATEFUL_LOGICAL_RESOURCE_IDS);
+const updateReadyStackStatuses = new Set(['CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE']);
+
+export function updateReadyStackStatus(status) {
+  return updateReadyStackStatuses.has(status);
+}
+
+export function rollbackHasSkippedResources(stack, resources = []) {
+  const reasons = [stack?.StackStatusReason, ...resources.map(resource => resource?.ResourceStatusReason)];
+  return reasons.some(reason => typeof reason === 'string' && /Resources?(?: were)? skipped during UpdateRollback/i.test(reason));
+}
 
 export function unsafeStatefulChanges(changes = []) {
   return changes.filter(change => {

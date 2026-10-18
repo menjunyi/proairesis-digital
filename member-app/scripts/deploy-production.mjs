@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { hashDirectory, requireSafeStatefulChanges } from './release-safety.mjs';
+import { hashDirectory, requireSafeStatefulChanges, rollbackHasSkippedResources, updateReadyStackStatus } from './release-safety.mjs';
 
 const ACCOUNT = '037169690315';
 const REGION = 'ap-southeast-2';
@@ -138,7 +138,12 @@ const identity = awsJson(['sts', 'get-caller-identity']);
 requireValue(identity.Account === ACCOUNT, 'Refusing to deploy to an unexpected AWS account.');
 const stack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
 requireValue(stack?.StackId?.startsWith(`arn:aws:cloudformation:${REGION}:${ACCOUNT}:stack/${STACK}/`), 'The production stack identity does not match.');
-requireValue(['CREATE_COMPLETE', 'UPDATE_COMPLETE'].includes(stack.StackStatus), 'The production stack is not ready for an update.');
+requireValue(updateReadyStackStatus(stack.StackStatus), 'The production stack is not ready for an update.');
+if (stack.StackStatus === 'UPDATE_ROLLBACK_COMPLETE') {
+  const resources = awsJson(['cloudformation', 'describe-stack-resources', '--stack-name', STACK]).StackResources ?? [];
+  requireValue(!rollbackHasSkippedResources(stack, resources),
+    'The completed rollback skipped resources. Reconcile them and review drift before another production update.');
+}
 
 const manifest = JSON.parse(await readFile(resolve('dist/release.json'), 'utf8'));
 requireValue(manifest.version === 3 && /^[a-f0-9]{64}$/.test(manifest.releaseId || '') &&
@@ -359,7 +364,9 @@ const reviewedSite = await extractVerifiedSiteArchive(remoteSite.path, manifest)
 await rm(remoteSite.root, { recursive: true, force: true });
 run(['cloudformation', 'update-termination-protection', '--enable-termination-protection', '--stack-name', STACK]);
 const protectedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
-requireValue(protectedStack?.EnableTerminationProtection === true, 'Production stack termination protection was not enabled.');
+requireValue(protectedStack?.StackId === stack.StackId && updateReadyStackStatus(protectedStack.StackStatus),
+  'The production stack changed state before the reviewed change set could execute.');
+requireValue(protectedStack.EnableTerminationProtection === true, 'Production stack termination protection was not enabled.');
 if (planned.ExecutionStatus === 'AVAILABLE') {
   run(['cloudformation', 'execute-change-set', '--stack-name', STACK, '--change-set-name', existingChangeSet]);
   run(['cloudformation', 'wait', 'stack-update-complete', '--stack-name', STACK], { timeout: 2_700_000 });
