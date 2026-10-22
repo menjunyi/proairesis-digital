@@ -107,8 +107,8 @@ test("opportunity and application visual tabs expose their selected state", () =
         capabilities,
       }),
     );
-    assert.match(workspace, /aria-pressed="true"[^>]*>.*Cover letter/s);
-    assert.match(workspace, /aria-pressed="false"[^>]*>Match &amp; notes/);
+    assert.match(workspace, /aria-pressed="false"[^>]*>.*Cover letter/s);
+    assert.match(workspace, /aria-pressed="true"[^>]*>Match &amp; notes/);
   } finally {
     if (storage === undefined) delete globalThis.sessionStorage;
     else globalThis.sessionStorage = storage;

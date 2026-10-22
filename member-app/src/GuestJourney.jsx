@@ -282,7 +282,7 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
       </label>
       <ErrorBox error={error} />
       <button
-        className="button guest-primary"
+        className="button guest-primary guest-extract-button"
         disabled={busy || !file || !consent}
         onClick={() => onUpload(file, consent)}
       >
@@ -294,7 +294,11 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
 }
 
 function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
-  const [draft, setDraft] = useState(initial);
+  const [draft, setDraft] = useState(() => ({
+    ...initial,
+    workRights: !initial.confirmed && initial.workRights === "unknown" ? "" : initial.workRights || "",
+    needsSponsorship: !initial.confirmed && initial.needsSponsorship === "unknown" ? "" : initial.needsSponsorship || "",
+  }));
   const acknowledgements = reviewAcknowledgements(initial);
   const [reviewed, setReviewed] = useState(acknowledgements.reviewed);
   const [terms, setTerms] = useState(acknowledgements.termsAccepted);
@@ -327,7 +331,7 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
     set("roleFamilies", current.includes(family) ? current.filter((value) => value !== family) : [...current, family]);
   };
   const errors = profileErrors(draft);
-  const showVisaLimitations = ["visa-limited", "unknown"].includes(draft.workRights);
+  const showVisaLimitations = ["", "visa-limited", "unknown"].includes(draft.workRights);
   return (
     <section className="guest-card guest-review" aria-labelledby="review-title">
       <button className="guest-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
@@ -359,10 +363,11 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
         </div>
       </fieldset>
       <div className="essential-questions">
-        <h2>Two eligibility details we cannot infer</h2>
+        <h2>Tell us about your right to work and availability</h2>
         <div className="profile-summary-grid">
-          <Field label="Australian work rights">
-            <select value={draft.workRights || "unknown"} onChange={(event) => set("workRights", event.target.value)}>
+          <Field label="What is your current right to work in Australia?">
+            <select required value={draft.workRights} onChange={(event) => set("workRights", event.target.value)}>
+              <option value="" disabled>Select an option</option>
               <option value="unknown">I’m not sure</option>
               <option value="citizen">Australian citizen</option>
               <option value="permanent-resident">Permanent resident</option>
@@ -371,8 +376,9 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
               <option value="none">No current Australian work rights</option>
             </select>
           </Field>
-          <Field label="Do you need employer sponsorship?">
-            <select value={draft.needsSponsorship || "unknown"} onChange={(event) => set("needsSponsorship", event.target.value)}>
+          <Field label="Do you need an employer to sponsor your visa to work in Australia?">
+            <select required value={draft.needsSponsorship} onChange={(event) => set("needsSponsorship", event.target.value)}>
+              <option value="" disabled>Select an option</option>
               <option value="unknown">I’m not sure</option>
               <option value="no">No</option>
               <option value="now">Yes, now</option>
@@ -381,12 +387,12 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
           </Field>
         </div>
         {showVisaLimitations && (
-          <Field label="Visa work limitations (optional)" hint="Only practical limits such as hours, occupation, employer, location or expiry. Do not enter a visa number.">
-            <textarea rows={3} maxLength={1000} value={draft.visaLimitations || ""} onChange={(event) => set("visaLimitations", event.target.value)} />
+          <Field label="Does your visa limit when, where or how much you can work? (Optional)" hint="Leave blank if none. Do not enter a visa number.">
+            <textarea placeholder="For example: a limit on working hours, a specific employer or location, or a visa expiry date." rows={3} maxLength={1000} value={draft.visaLimitations || ""} onChange={(event) => set("visaLimitations", event.target.value)} />
           </Field>
         )}
-        <Field label="Other practical limitations (optional)" hint="For example, available from November or no regular overnight travel. Do not share sensitive personal details.">
-          <textarea rows={3} maxLength={2000} value={draft.preferences?.limitations || ""} onChange={(event) => setPreference("limitations", event.target.value)} />
+        <Field label="When can you start, and are there any work arrangements you cannot accept? (Optional)" hint="Leave blank if none.">
+          <textarea placeholder="For example: available from November, weekdays only, or unable to travel overnight." rows={3} maxLength={2000} value={draft.preferences?.limitations || ""} onChange={(event) => setPreference("limitations", event.target.value)} />
         </Field>
       </div>
       <details className="guest-resume-review">

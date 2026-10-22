@@ -164,6 +164,7 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       else if((match=path.match(/^\/api\/applications\/([^/]+)\/letters\/([^/]+)$/))&&method==='PATCH')result=await service.editLetter(user,decodePathId(match[1]),decodePathId(match[2]),body);
       else if(path==='/api/billing/checkout'&&method==='POST')result=await service.checkout(user,body);
       else if(path==='/api/billing/portal'&&method==='POST')result=await service.portal(user);
+      else if(path==='/api/billing/history'&&method==='GET')result=await service.paymentHistory(user);
       else if(path==='/api/billing/refresh'&&method==='POST')result=await service.refreshBilling(user);
       else if(path==='/api/export'&&method==='GET')result=await service.exportAccount(user,cursor());
       else if(path==='/api/account'&&method==='DELETE'){assertRecentDeletionAuth(user);result=await service.deleteAccount(user,body);}

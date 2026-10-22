@@ -1924,17 +1924,18 @@ button svg {
 }
 .application-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 15px;
   margin-top: 26px;
 }
 .application-controls .field {
-  font-size: 10px;
+  font-size: 14px;
 }
 .application-controls select {
-  font-size: 11px;
-  min-height: 39px;
+  font-size: 16px;
+  min-height: 44px;
   padding: 8px 26px 8px 11px;
   min-width: 145px;
 }
@@ -1945,7 +1946,7 @@ button svg {
   background: #f8f7ef;
 }
 .application-tabs > button {
-  font-size: 11px;
+  font-size: 16px;
   padding: 15px 1px;
 }
 .application-workspace > .notice {
@@ -1953,10 +1954,53 @@ button svg {
 }
 .application-body {
   padding: 25px 28px;
+  container-type: inline-size;
 }
 .application-body > .field {
   margin-bottom: 14px;
 }
+.application-summary {
+  display: grid;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.application-summary > div {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.application-summary .summary-fit { background: #edf4e9; }
+.application-summary .summary-gaps { background: #fff9eb; }
+@container (min-width: 560px) {
+  .application-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .application-summary > div:first-child {
+    grid-column: 1 / -1;
+  }
+}
+.application-summary h3 { font-size: 20px; margin-bottom: 10px; }
+.application-summary p,
+.application-workspace .job-description p,
+.application-workspace .evidence-section li > strong,
+.application-workspace .evidence-section li > p,
+.application-workspace .evidence-section > .subtle,
+.application-body > .field,
+.application-body > .field textarea {
+  font-size: 16px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.application-supporting-details { margin: 0 0 24px; }
+.application-supporting-details > summary {
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 0;
+  min-height: 44px;
+}
+.application-controls .button { font-size: 16px; min-height: 44px; }
 .letter-allowance {
   display: flex;
   align-items: center;
@@ -2105,6 +2149,11 @@ button svg {
 .account-card {
   padding: 29px;
 }
+.payment-history ul { list-style: none; padding: 0; margin: 24px 0; }
+.payment-history li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--border); }
+.payment-history li > div { display: grid; gap: 8px; }
+.payment-history li strong { font-size: 20px; }
+.payment-history li span { font-size: 14px; line-height: 1.5; }
 .account-card h2 {
   font-size: 29px;
   margin-top: 16px;
@@ -3185,6 +3234,13 @@ button svg {
   justify-self: start;
   min-height: 50px;
   font-size: 14px;
+}
+.guest-extract-button {
+  margin-top: 24px;
+  margin-bottom: 16px;
+}
+.guest-extract-button + .subtle {
+  margin-top: 0;
 }
 .guest-trust,
 .guest-results-footnote,

@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { jobBrief, matchSummary } from "./job-summary.js";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -3502,12 +3503,13 @@ export function ApplicationWorkspace({
         : null,
     ),
     [aiProcessingConfirmed, setAiProcessingConfirmed] = useState(false),
-    [tab, setTab] = useState("letter");
+    [tab, setTab] = useState("details");
   const generationKey = `roleclue.generation.${application.id}`;
   const currentLetter = (application.letters || []).find(
     (l) => l.id === letterId,
   );
   const job = application.job;
+  const summary = matchSummary(application.match);
   const hasUnsavedChanges = hasUnsavedApplicationChanges(
     application,
     notes,
@@ -3787,10 +3789,13 @@ export function ApplicationWorkspace({
           </Field>
           <ExternalLink
             href={job.url || job.sourceUrl}
-            className="button secondary small"
+            className="button secondary"
           >
-            Open job listing
+            Apply directly
           </ExternalLink>
+          <button className="button" onClick={() => setTab("letter")}>
+            <FileText size={18} /> {pending ? "Preparing your draft" : "Write cover letter"}
+          </button>
         </div>
         {availability.status !== "available" && (
           <div className="notice warning">
@@ -3829,6 +3834,25 @@ export function ApplicationWorkspace({
       <ErrorBox error={error} />
       {tab === "details" ? (
         <div className="application-body">
+          {pending && <p role="status">Your draft is being prepared. You can leave this page and return.</p>}
+          <section className="application-summary" aria-label="Job overview and fit">
+            <div>
+              <h3>About this role</h3>
+              <p>{jobBrief(job)}</p>
+            </div>
+            <div className="summary-fit">
+              <h3>What fits</h3>
+              <p>{summary.fit}</p>
+            </div>
+            <div className="summary-gaps">
+              <h3>Gaps and questions</h3>
+              <p>{summary.gaps}</p>
+            </div>
+          </section>
+          <details className="application-supporting-details job-description">
+            <summary>Read the full job description</summary>
+            <p>{job.description}</p>
+          </details>
           <Field label="Your notes">
             <textarea
               rows="5"
@@ -3845,11 +3869,6 @@ export function ApplicationWorkspace({
           >
             Save notes
           </button>
-          {application.match && <MatchEvidence match={application.match} />}
-          <section className="job-description">
-            <h3>Saved job description</h3>
-            <p>{job.description}</p>
-          </section>
         </div>
       ) : (
         <div className="application-body">
@@ -4288,6 +4307,47 @@ export function UpgradeDialog({ api, billing, onClose }) {
   );
 }
 
+export function PaymentHistory({ api }) {
+  const [history, setHistory] = useState(null);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setHistory(null);
+    setError(null);
+    api("/billing/history").then((result) => {
+      if (!Array.isArray(result?.payments)) throw new Error("Payment history could not be loaded.");
+      if (active) setHistory(result);
+    }).catch((failure) => { if (active) setError(failure); });
+    return () => { active = false; };
+  }, [api, attempt]);
+  const money = (amount, currency) => {
+    const format = new Intl.NumberFormat("en-AU", { style: "currency", currency });
+    return format.format(amount / 10 ** format.resolvedOptions().maximumFractionDigits);
+  };
+  return (
+    <section className="panel account-card payment-history">
+      <h2>Payment history</h2>
+      <p>Your recent payments and Stripe receipts, including one-time purchases.</p>
+      <ErrorBox error={error} />
+      {!history && !error && <p role="status">Loading payments…</p>}
+      {history?.payments.length === 0 && <p>No payment records are available yet. If you just paid, refresh in a moment.</p>}
+      {history?.payments.length > 0 && <ul>
+        {history.payments.map((payment) => (
+          <li key={payment.id}>
+            <div><strong>{money(payment.amount, payment.currency)}</strong><span>{date(payment.createdAt)} · {label(payment.status)}</span>
+              {payment.refundedAmount > 0 && <span>Refunded: {money(payment.refundedAmount, payment.currency)}</span>}
+            </div>
+            {payment.receiptUrl ? <ExternalLink href={payment.receiptUrl} className="button secondary small">View receipt</ExternalLink> : <span>Receipt unavailable</span>}
+          </li>
+        ))}
+      </ul>}
+      {history?.hasMore && <p>Showing the 20 most recent payments. Contact support for older receipts.</p>}
+      <button className="text-link" disabled={!history && !error} onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={16} /> Refresh payment history</button>
+    </section>
+  );
+}
+
 export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice, onDeleted, dataOnly = false }) {
   const capabilities = capabilitiesFor(config, me.capabilities);
   const [busy, setBusy] = useState(""),
@@ -4501,6 +4561,7 @@ export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice,
             <Pill tone="neutral">Subscription: {label(billing.subscriptionStatus)}</Pill>
           )}
         </section>}
+        {!dataOnly && capabilities.billing && <PaymentHistory api={api} />}
         <section className="panel account-card">
           <span className="eyebrow">YOUR DETAILS</span>
           <h2>{me.profile.name || "Your account"}</h2>

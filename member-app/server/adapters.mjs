@@ -477,6 +477,20 @@ export async function createBilling(env,dependencies={}){
     if(!managed&&!['canceled','incomplete_expired'].includes(sub.status))throw unavailable('The completed checkout subscription status could not be verified.');
     return {status:'complete',subscriptionId:sub.id,hasSubscription:managed,ended:!managed};
   },
+  async history(user,store){
+    const e=(await store.get(`USER#${user.sub}`,'ENTITLEMENT'))?.value;
+    if(!e?.customerId)return {payments:[],hasMore:false};
+    if(typeof e.customerId!=='string'||!/^cus_[A-Za-z0-9]+$/.test(e.customerId)||(await store.get('BILLING#customers',e.customerId))?.value?.userSub!==user.sub)throw unavailable('Billing ownership could not be verified.');
+    const s=await stripe(),result=await s.charges.list({customer:e.customerId,limit:20});
+    if(result.data.some(charge=>objectId(charge.customer)!==e.customerId))throw unavailable('Payment ownership could not be verified.');
+    const payments=result.data.map(charge=>{
+      let receiptUrl=null;
+      try{const url=new URL(charge.receipt_url);if(url.protocol==='https:'&&url.hostname==='pay.stripe.com'&&!url.username&&!url.password)receiptUrl=url.href;}catch{}
+      return {id:charge.id,createdAt:new Date(charge.created*1000).toISOString(),amount:charge.amount,currency:charge.currency,refundedAmount:charge.amount_refunded||0,
+        status:charge.disputed?'disputed':charge.refunded?'refunded':charge.amount_refunded>0?'partially_refunded':charge.status==='succeeded'&&charge.paid&&charge.captured?'paid':charge.status==='failed'?'failed':'pending',receiptUrl};
+    });
+    return {payments,hasMore:result.has_more===true};
+  },
   async portal(user,store){
     const e=(await store.get(`USER#${user.sub}`,'ENTITLEMENT'))?.value;if(!e?.customerId)throw new HttpError(404,'NOT_FOUND','No billing account is available.');
     if(typeof e.customerId!=='string'||!/^cus_[A-Za-z0-9]+$/.test(e.customerId)||(await store.get('BILLING#customers',e.customerId))?.value?.userSub!==user.sub)throw unavailable('Billing ownership could not be verified.');

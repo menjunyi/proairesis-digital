@@ -1081,6 +1081,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     }finally{const row=await store.get(pk,'CHECKOUT_LOCK');if(row?.value.owner===owner)await store.transact([{pk,sk:'CHECKOUT_LOCK',expected:row.revision,remove:true}]);}
   }
   async function portal(user){if(!billing)fail(503,'SERVICE_UNAVAILABLE','Billing management is not yet enabled.');return billing.portal(user,store);}
+  async function paymentHistory(user){await assertActive(pkOf(user));if(!billing?.history)fail(503,'SERVICE_UNAVAILABLE','Payment history is temporarily unavailable.');return billing.history(user,store);}
   async function refreshBilling(user){
     if(!billing?.reconcile)fail(503,'SERVICE_UNAVAILABLE','Subscriptions are not yet enabled.');
     const pk=pkOf(user);await assertActive(pk);
@@ -1168,5 +1169,5 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(identity)await identity.remove(user.identityUsername??user.sub);
     return {deleted:true};
   }
-  return {assertActive:user=>assertActive(pkOf(user)),capabilities,account,completeContinuation,saveProfile,uploadResume,startUpload,finalizeUpload,startGuest,readGuest,guestResume,saveGuestProfile,searchGuest,ignoreGuest,claimGuest,abandonGuest,opportunities,refreshOpportunities,refreshRecommendationsForSub,queueRecommendationRefreshes,reconcileBillingForCustomer,queueBillingReconciliations,repairPendingGenerations,importOpportunity,decision,applications,updateApplication,generate,generationResult,runGeneration,editLetter,checkout,portal,refreshBilling,exportAccount,deleteAccount,webhook:async(raw,sig)=>{if(!billing)fail(503,'SERVICE_UNAVAILABLE','Billing is unavailable.');return billing.webhook(raw,sig,store);}};
+  return {assertActive:user=>assertActive(pkOf(user)),capabilities,account,completeContinuation,saveProfile,uploadResume,startUpload,finalizeUpload,startGuest,readGuest,guestResume,saveGuestProfile,searchGuest,ignoreGuest,claimGuest,abandonGuest,opportunities,refreshOpportunities,refreshRecommendationsForSub,queueRecommendationRefreshes,reconcileBillingForCustomer,queueBillingReconciliations,repairPendingGenerations,importOpportunity,decision,applications,updateApplication,generate,generationResult,runGeneration,editLetter,checkout,portal,paymentHistory,refreshBilling,exportAccount,deleteAccount,webhook:async(raw,sig)=>{if(!billing)fail(503,'SERVICE_UNAVAILABLE','Billing is unavailable.');return billing.webhook(raw,sig,store);}};
 }
