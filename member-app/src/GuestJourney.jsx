@@ -206,7 +206,7 @@ function SituationStep({ value, setValue, busy, error, onSubmit }) {
           >
             <option value="actively-looking">Actively looking</option>
             <option value="exploring">Exploring a move</option>
-            <option value="graduate">Graduate or first technology role</option>
+            <option value="graduate">Graduate / first role</option>
             <option value="career-change">Changing careers</option>
             <option value="returning">Returning to work</option>
           </select>
@@ -371,9 +371,9 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
               <option value="unknown">I’m not sure</option>
               <option value="citizen">Australian citizen</option>
               <option value="permanent-resident">Permanent resident</option>
-              <option value="visa-unrestricted">Visa with unrestricted work rights</option>
-              <option value="visa-limited">Visa with work limitations</option>
-              <option value="none">No current Australian work rights</option>
+              <option value="visa-unrestricted">Visa: unrestricted</option>
+              <option value="visa-limited">Visa: restricted</option>
+              <option value="none">No work rights</option>
             </select>
           </Field>
           <Field label="Do you need an employer to sponsor your visa to work in Australia?">

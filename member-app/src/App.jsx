@@ -2086,7 +2086,7 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
                 <option value="actively-looking">Actively looking</option>
                 <option value="exploring">Exploring a move</option>
                 <option value="graduate">
-                  Graduate / first technology role
+                  Graduate / first role
                 </option>
                 <option value="career-change">Changing careers</option>
                 <option value="returning">Returning to work</option>
@@ -2110,13 +2110,13 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
                 <option value="citizen">Australian citizen</option>
                 <option value="permanent-resident">Permanent resident</option>
                 <option value="visa-unrestricted">
-                  Visa with unrestricted work rights
+                  Visa: unrestricted
                 </option>
-                <option value="visa-limited">Visa with work limitations</option>
+                <option value="visa-limited">Visa: restricted</option>
                 {draft.workRights === "visa" && (
-                  <option value="visa">Current visa (review this answer)</option>
+                  <option value="visa">Visa (review answer)</option>
                 )}
-                <option value="none">No current Australian work rights</option>
+                <option value="none">No work rights</option>
               </select>
             </Field>
             <Field label="Do you need employer sponsorship?">
@@ -2124,12 +2124,12 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
                 value={draft.needsSponsorship}
                 onChange={(e) => set("needsSponsorship", e.target.value)}
               >
-                <option value="unknown">Not sure / prefer to confirm</option>
+                <option value="unknown">I’m not sure</option>
                 <option value="no">No</option>
                 <option value="now">Yes, now</option>
                 <option value="later">Not now, but later</option>
                 {draft.needsSponsorship === "yes" && (
-                  <option value="yes">Yes (review this answer)</option>
+                  <option value="yes">Yes (review answer)</option>
                 )}
               </select>
             </Field>
