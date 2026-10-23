@@ -77,7 +77,7 @@ function paginationState(user,scope,rows,cursor){
 }
 const nextPageCursor=state=>Buffer.from(JSON.stringify(state)).toString('base64url');
 function assertPageFits(value){if(jsonBytes(value)>PAGE_BYTES)fail(413,'PAGE_TOO_LARGE','An account record is too large to return safely. Contact support.');return value;}
-const blankProfile=(email,name='')=>({name:typeof name==='string'?name.trim().slice(0,250):'',email,resumeText:'',skills:[],roleFamilies:[],yearsExperience:null,situation:'actively-looking',location:'',workRights:'unknown',needsSponsorship:'unknown',clearance:'unknown',preferences:{locations:[],locationsRequired:false,includeRemote:false,workplaceTypes:[],employmentTypes:[],roleTitles:[],minimumSalary:null,salaryPeriod:'year',seniority:[],relocation:false,limitations:''},confirmed:false,consentAt:null});
+const blankProfile=(email,name='')=>({name:typeof name==='string'?name.trim().slice(0,250):'',email,resumeText:'',skills:[],roleFamilies:[],yearsExperience:null,situation:'actively-looking',location:'',workRights:'unknown',needsSponsorship:'unknown',visaLimitations:'',clearance:'unknown',preferences:{locations:[],locationsRequired:false,includeRemote:false,workplaceTypes:[],employmentTypes:[],roleTitles:[],minimumSalary:null,salaryPeriod:'year',seniority:[],relocation:false,limitations:''},interviewCompleted:false,confirmed:false,consentAt:null});
 export const TERMS_VERSION='roleclue-v1-2026-10-12-starter-50';
 export const MONTHLY_GENERATION_LIMIT=50;
 export const STARTER_GENERATION_LIMIT=2;
@@ -112,8 +112,55 @@ export function billingView(e=blankEntitlement(),now=Date.now()) {
 }
 function safeString(v,max=250){return typeof v==='string'?v.trim().slice(0,max):'';}
 function strings(v,max=20){return Array.isArray(v)?v.filter(x=>typeof x==='string').map(x=>safeString(x,200)).filter(Boolean).slice(0,max):[];}
+const GUEST_INTERVIEW_KEYS=new Set(['situation','location','remote','roleFamilies','workRights','needsSponsorship','visaLimitations','limitations','interviewCompleted']);
+const GUEST_SITUATIONS=['actively-looking','exploring','graduate','career-change','returning'];
+const WORK_RIGHTS=['citizen','permanent-resident','visa','visa-unrestricted','visa-limited','none','unknown'];
+const SPONSORSHIP_NEEDS=['yes','no','now','later','unknown'];
+function guestInterviewError(code,message){fail(400,code,message);}
+function guestInterviewString(input,key,max,existing,code){
+  if(!(key in input))return safeString(existing?.[key],max);
+  if(typeof input[key]!=='string'||input[key].length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input[key]))guestInterviewError(code,`Enter a valid ${key}.`);
+  return input[key].trim();
+}
+function cleanGuestInterview(input,existing={},code='INVALID_GUEST_START'){
+  if(!isPlainObject(input)||Object.keys(input).some(key=>!GUEST_INTERVIEW_KEYS.has(key)))guestInterviewError(code,'Send only supported interview answers.');
+  const previous={
+    situation:GUEST_SITUATIONS.includes(existing.situation)?existing.situation:'actively-looking',
+    location:safeString(existing.location,250),
+    remote:typeof existing.remote==='boolean'?existing.remote:null,
+    roleFamilies:Array.isArray(existing.roleFamilies)?existing.roleFamilies.filter(value=>ROLE_FAMILIES.includes(value)).slice(0,3):[],
+    workRights:WORK_RIGHTS.includes(existing.workRights)?existing.workRights:'unknown',
+    needsSponsorship:SPONSORSHIP_NEEDS.includes(existing.needsSponsorship)?existing.needsSponsorship:'unknown',
+    visaLimitations:safeString(existing.visaLimitations,1000),
+    limitations:safeString(existing.limitations,2000),
+    interviewCompleted:existing.interviewCompleted===true,
+  };
+  const answer={...previous};
+  if('situation'in input){if(!GUEST_SITUATIONS.includes(input.situation))guestInterviewError(code,'Choose your current job-search situation.');answer.situation=input.situation;}
+  answer.location=guestInterviewString(input,'location',250,previous,code);
+  if('remote'in input){if(input.remote!==null&&typeof input.remote!=='boolean')guestInterviewError(code,'Choose whether you prefer remote work.');answer.remote=input.remote;}
+  if('roleFamilies'in input){
+    if(!Array.isArray(input.roleFamilies)||input.roleFamilies.length>3||input.roleFamilies.some(value=>typeof value!=='string'))guestInterviewError(code,'Choose up to three supported role families.');
+    const roleFamilies=input.roleFamilies.map(value=>value.trim());
+    if(roleFamilies.some(value=>!ROLE_FAMILIES.includes(value))||new Set(roleFamilies).size!==roleFamilies.length)guestInterviewError(code,'Choose up to three supported role families.');
+    answer.roleFamilies=roleFamilies;
+  }
+  if('workRights'in input){if(!WORK_RIGHTS.includes(input.workRights))guestInterviewError(code,'Choose a valid work-rights answer.');answer.workRights=input.workRights;}
+  if('needsSponsorship'in input){if(!SPONSORSHIP_NEEDS.includes(input.needsSponsorship))guestInterviewError(code,'Choose a valid sponsorship answer.');answer.needsSponsorship=input.needsSponsorship;}
+  answer.visaLimitations=guestInterviewString(input,'visaLimitations',1000,previous,code);
+  answer.limitations=guestInterviewString(input,'limitations',2000,previous,code);
+  if('interviewCompleted'in input){if(typeof input.interviewCompleted!=='boolean')guestInterviewError(code,'Confirm whether the interview is complete.');answer.interviewCompleted=input.interviewCompleted;}
+  if(answer.interviewCompleted){
+    if(!answer.location)guestInterviewError(code,'Enter the location where you want to work.');
+    if(!answer.roleFamilies.length)guestInterviewError(code,'Choose at least one target role family.');
+    if(typeof answer.remote!=='boolean')guestInterviewError(code,'Choose whether remote roles suit you.');
+    if(previous.interviewCompleted!==true&&(!('workRights'in input)||!('needsSponsorship'in input)))guestInterviewError(code,'Answer the work-rights and sponsorship questions, including “not sure” when needed.');
+    if(['citizen','permanent-resident'].includes(answer.workRights)&&['yes','now','later'].includes(answer.needsSponsorship))guestInterviewError(code,'Check your work rights and sponsorship answers: citizens and permanent residents do not require employer sponsorship.');
+  }
+  return answer;
+}
 function mergeResumeEvidence(existing,email,parsed){
-  const base={...blankProfile(email),...existing},suggested=suggestProfileFromResume(parsed.text,parsed.skills).values;
+  const base={...blankProfile(email),...existing,interviewCompleted:existing?.interviewCompleted===true||existing?.confirmed===true},suggested=suggestProfileFromResume(parsed.text,parsed.skills).values;
   const location=safeString(base.location)||suggested.location,preferences={...blankProfile(email).preferences,...base.preferences};
   if(!preferences.locations?.length&&location)preferences.locations=[location];
   if(!preferences.roleTitles?.length&&suggested.roleTitles.length)preferences.roleTitles=suggested.roleTitles;
@@ -134,6 +181,7 @@ function cleanProfile(input,existing,email){
   if('marketingConsent'in input)p.marketingConsent=input.marketingConsent===true;
   for(const k of ['name','location','clearance'])if(k in input)p[k]=safeString(input[k]);
   if('visaLimitations'in input)p.visaLimitations=safeString(input.visaLimitations,1000);
+  if('interviewCompleted'in input){if(typeof input.interviewCompleted!=='boolean')fail(400,'INVALID_PROFILE','Confirm whether the interview is complete.');p.interviewCompleted=input.interviewCompleted;}
   if('resumeText'in input){if(typeof input.resumeText!=='string'||Buffer.byteLength(input.resumeText)>180000)fail(400,'INVALID_PROFILE','Resume text is too long.');p.resumeText=input.resumeText;}
   for(const [k,allowed]of Object.entries({situation:['actively-looking','exploring','graduate','career-change','returning'],workRights:['citizen','permanent-resident','visa','visa-unrestricted','visa-limited','none','unknown'],needsSponsorship:['yes','no','now','later','unknown']})){if(k in input){if(!allowed.includes(input[k]))fail(400,'INVALID_PROFILE',`Choose a valid ${k}.`);p[k]=input[k];}}
   if('skills'in input)p.skills=strings(input.skills,60);
@@ -141,6 +189,7 @@ function cleanProfile(input,existing,email){
   if('yearsExperience'in input)p.yearsExperience=Number.isFinite(input.yearsExperience)&&input.yearsExperience>=0&&input.yearsExperience<=70?input.yearsExperience:null;
   if('preferences'in input){if(!isPlainObject(input.preferences))fail(400,'INVALID_PROFILE','Send preferences as a valid object.');const q=input.preferences;p.preferences={...p.preferences};for(const k of ['locations','workplaceTypes','employmentTypes','roleTitles','seniority'])if(k in q)p.preferences[k]=strings(q[k]);for(const k of ['relocation','locationsRequired','includeRemote','workplaceRequired','minimumSalaryRequired'])if(k in q)p.preferences[k]=q[k]===true;if('limitations'in q)p.preferences.limitations=safeString(q.limitations,2000);if('salaryPeriod'in q)p.preferences.salaryPeriod=['year','hour','day'].includes(q.salaryPeriod)?q.salaryPeriod:'year';if('minimumSalary'in q)p.preferences.minimumSalary=Number.isFinite(q.minimumSalary)&&q.minimumSalary>0?q.minimumSalary:null;}
   p.confirmed=input.confirmed===true;
+  if(p.confirmed)p.interviewCompleted=true;
   if(p.confirmed&&['citizen','permanent-resident'].includes(p.workRights)&&['yes','now','later'].includes(p.needsSponsorship))fail(400,'INVALID_PROFILE','Check your work rights and sponsorship answers: citizens and permanent residents do not require employer sponsorship.');
   if(p.confirmed&&p.preferences.locationsRequired&&!p.preferences.locations?.length)fail(400,'INVALID_PROFILE','Enter a preferred location or turn off the location requirement.');
   if(p.confirmed&&p.preferences.workplaceRequired&&!p.preferences.workplaceTypes?.length)fail(400,'INVALID_PROFILE','Select a work arrangement or turn off the work-arrangement requirement.');
@@ -463,29 +512,42 @@ export function createService({store,mode='production',provider,dispatch,files,b
   }
   async function guestResponse(token,pk,session){const opportunities=await guestOpportunities(pk,session),guest={...publicGuest(session),expiresAt:session.expiresAt,profile:session.profile??null};if(['opportunities','claimed'].includes(session.stage))guest.opportunities=opportunities;return {token,expiresAt:session.expiresAt,guest,profile:session.profile??null,opportunities};}
   async function startGuest(input,sourceIp){
-    if(!isPlainObject(input)||Object.keys(input).some(key=>!['situation','location','remote'].includes(key)))fail(400,'INVALID_GUEST_START','Send only your situation, location and remote preference.');
-    const situations=['actively-looking','exploring','graduate','career-change','returning'];
-    if(!situations.includes(input.situation))fail(400,'INVALID_GUEST_START','Choose your current job-search situation.');
-    const location=safeString(input.location,250);if(/[\u0000-\u001f\u007f]/.test(location))fail(400,'INVALID_GUEST_START','Enter a valid location.');
-    if(input.remote!==undefined&&input.remote!==null&&typeof input.remote!=='boolean')fail(400,'INVALID_GUEST_START','Choose whether you prefer remote work.');
+    if(!isPlainObject(input)||!('situation'in input))fail(400,'INVALID_GUEST_START','Send your current job-search situation.');
+    const interview=cleanGuestInterview(input,{},'INVALID_GUEST_START');
     if(!await guestSearch?.available?.())fail(503,'JOB_SEARCH_NOT_CONFIGURED','Live job search is awaiting source approval. No resume was uploaded.');
     await consumeGuestRate(null,sourceIp,'start');
     for(let attempt=0;attempt<3;attempt++){
-      const token=newGuestToken(),pk=guestPartition(token),expiry=guestExpiry(),session={version:1,createdAt:iso(),expiresAt:expiry.expiresAt,stage:'resume',situation:input.situation,location,remote:typeof input.remote==='boolean'?input.remote:null,profile:null,suggestions:null,resumeWarnings:[],opportunityIds:[],ignoredJobIds:[],selectedJobId:null,search:null};
+      const token=newGuestToken(),pk=guestPartition(token),expiry=guestExpiry(),session={version:1,createdAt:iso(),expiresAt:expiry.expiresAt,stage:'resume',...interview,profile:null,suggestions:null,resumeWarnings:[],opportunityIds:[],ignoredJobIds:[],selectedJobId:null,search:null};
       try{await store.transact([{...change(pk,'SESSION',null,session),ttl:expiry.ttl}]);return guestResponse(token,pk,session);}catch(error){if(!(error instanceof Conflict)||attempt===2)throw error;}
     }
   }
   async function readGuest(input,sourceIp){const state=await requiredGuest(input.token);await consumeGuestRate(state.pk,sourceIp,'session');return guestResponse(input.token,state.pk,state.session);}
   async function guestResume(input,sourceIp){
-    const state=await requiredGuest(input.token);await consumeGuestRate(state.pk,sourceIp,'resume');
+    const allowed=new Set(['token','consent','filename','contentType','dataBase64','interview']);
+    if(!isPlainObject(input)||Object.keys(input).some(key=>!allowed.has(key)))fail(400,'INVALID_GUEST_RESUME','Send only the resume and supported interview answers.');
+    let state=await requiredGuest(input.token);await consumeGuestRate(state.pk,sourceIp,'resume');
     assertGuestOpen(state.session);
     if(input.consent!==true)fail(400,'CONSENT_REQUIRED','Confirm resume processing before uploading.');
+    if('interview'in input){
+      const interview=cleanGuestInterview(input.interview,state.session,'INVALID_GUEST_RESUME'),session={...state.session,...interview};
+      try{await store.transact([change(state.pk,'SESSION',state.row,session)]);}catch(error){if(error instanceof Conflict)fail(409,'GUEST_SESSION_CHANGED','This guest session changed in another tab. Reload it and try again.');throw error;}
+      const row=await store.get(state.pk,'SESSION');assertGuestOpen(row.value);state={...state,row,session:row.value};
+    }
     if(typeof input.dataBase64!=='string'||!/^[A-Za-z0-9+/]*={0,2}$/.test(input.dataBase64))fail(400,'INVALID_RESUME','Upload a valid PDF or DOCX no larger than 4 MB.');
     if(input.dataBase64.length>Math.ceil(GUEST_MAX_RESUME/3)*4+4)fail(413,'RESUME_TOO_LARGE','Guest resumes must not exceed 4 MB.');
     const bytes=Buffer.from(input.dataBase64,'base64');if(!bytes.length||bytes.length>GUEST_MAX_RESUME)fail(413,'RESUME_TOO_LARGE','Guest resumes must not exceed 4 MB.');
-    const parsed=await extract(safeString(input.filename,250),input.contentType,bytes),suggestions=suggestProfileFromResume(parsed.text,parsed.skills);
-    const suggested=suggestions.values,location=state.session.location||suggested.location;
-    const profile={...blankProfile(''),name:suggested.name,resumeText:parsed.text,skills:suggested.skills,roleFamilies:suggested.roleFamilies,yearsExperience:suggested.yearsExperience,situation:state.session.situation,location,preferences:{...blankProfile('').preferences,locations:location?[location]:[],locationsRequired:Boolean(location),includeRemote:state.session.remote===true,workplaceTypes:[],roleTitles:suggested.roleTitles},confirmed:false,consentAt:iso()};
+    const parsed=await extract(safeString(input.filename,250),input.contentType,bytes),suggestions=suggestProfileFromResume(parsed.text,parsed.skills),base=blankProfile('');
+    const interview={
+      situation:state.session.situation,
+      location:state.session.location,
+      roleFamilies:state.session.roleFamilies,
+      workRights:state.session.workRights,
+      needsSponsorship:state.session.needsSponsorship,
+      visaLimitations:state.session.visaLimitations,
+      interviewCompleted:state.session.interviewCompleted===true,
+      preferences:{...base.preferences,locations:state.session.location?[state.session.location]:[],locationsRequired:Boolean(state.session.location),includeRemote:state.session.remote===true,limitations:state.session.limitations},
+    };
+    const merged=mergeResumeEvidence(interview,'',parsed),profile={...merged,preferences:{...merged.preferences,locationsRequired:Boolean(merged.location)},confirmed:false,consentAt:iso()};
     assertProfileSize(profile);
     const session={...state.session,stage:'profile',profile,suggestions,resumeWarnings:parsed.warnings??[],opportunityIds:[],selectedJobId:null,search:null};
     const existing=await store.list(state.pk,'JOB#'),changes=[change(state.pk,'SESSION',state.row,session),...existing.map(row=>({pk:row.pk,sk:row.sk,expected:row.revision,remove:true}))];
@@ -501,7 +563,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
     const supplied={...input.profile};delete supplied.consentAt;delete supplied.email;delete supplied.termsAcceptedAt;delete supplied.termsVersion;
     const profile=cleanProfile({...supplied,resumeText:typeof supplied.resumeText==='string'?supplied.resumeText:state.session.profile.resumeText,confirmed:true,termsAccepted:true},state.session.profile,'');
     if(!profile.name)fail(400,'ESSENTIAL_PROFILE_REQUIRED','Confirm your name before continuing.');
-    const session={...state.session,stage:'search',situation:profile.situation,location:profile.location,profile,opportunityIds:[],selectedJobId:null,search:null};
+    const session={...state.session,stage:'search',situation:profile.situation,location:profile.location,remote:profile.preferences.includeRemote===true,roleFamilies:profile.roleFamilies,workRights:profile.workRights,needsSponsorship:profile.needsSponsorship,visaLimitations:profile.visaLimitations??'',limitations:profile.preferences.limitations??'',interviewCompleted:true,profile,opportunityIds:[],selectedJobId:null,search:null};
     const existing=await store.list(state.pk,'JOB#'),changes=[change(state.pk,'SESSION',state.row,session),...existing.map(row=>({pk:row.pk,sk:row.sk,expected:row.revision,remove:true}))];
     try{await store.transact(changes);}catch(error){if(error instanceof Conflict)fail(409,'GUEST_SESSION_CHANGED','This guest session changed in another tab. Reload it and try again.');throw error;}
     return guestResponse(input.token,state.pk,session);

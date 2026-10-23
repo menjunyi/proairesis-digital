@@ -7,6 +7,8 @@ import React, {
 } from "react";
 import { matchSummary } from "./job-summary.js";
 import ProcessedJobDescription from "./ProcessedJobDescription.jsx";
+import CareerInterview from "./CareerInterview.jsx";
+import { applyIntakeToProfile, intakeFromProfile } from "./intake.js";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -142,6 +144,7 @@ const blankProfile = {
     relocation: false,
     limitations: "",
   },
+  interviewCompleted: false,
   confirmed: false,
   consentAt: null,
 };
@@ -675,6 +678,14 @@ export default function App() {
     window.location.hash = "opportunities";
     setNotice("Your profile is saved. Your shortlist now reflects these details.");
   };
+  const onProfileDraftSaved = (profile) => {
+    if (
+      renderedSessionVersion !== sessionVersion.current ||
+      readSession()?.email !== session?.email
+    )
+      throw new Error("Your session changed. Please sign in again.");
+    setMe((current) => (current ? { ...current, profile } : current));
+  };
   if (configError)
     return (
       <div className="standalone">
@@ -1082,8 +1093,14 @@ export default function App() {
                 />
                 {onboarding && currentRoute === "profile" && (
                   <div className="onboarding-note">
-                    <span>01 / YOUR PROFILE</span> A few details now. A more
-                    useful shortlist next.
+                    <span>
+                      {me.profile?.interviewCompleted
+                        ? "02 / RESUME SHORTCUT"
+                        : "01 / QUICK INTERVIEW"}
+                    </span>{" "}
+                    {me.profile?.interviewCompleted
+                      ? "Add your career details without typing them again."
+                      : "Tell us what you need. We will use your resume to fill in the career details next."}
                   </div>
                 )}
                 {currentRoute === "profile" && (
@@ -1092,6 +1109,7 @@ export default function App() {
                     api={api}
                     profile={me.profile}
                     onboarding={onboarding}
+                    onDraftSaved={onProfileDraftSaved}
                     onSaved={onProfileSaved}
                   />
                 )}
@@ -1796,11 +1814,20 @@ export function AuthScreen({
   );
 }
 
-function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
+export function ProfileScreen({
+  config,
+  api,
+  profile,
+  onboarding,
+  onDraftSaved,
+  onSaved,
+}) {
   const [draft, setDraft] = useState(() => ({
     ...blankProfile,
     ...profile,
     preferences: { ...blankProfile.preferences, ...profile?.preferences },
+    interviewCompleted:
+      profile?.interviewCompleted === true || profile?.confirmed === true,
   }));
   const [processingConsent, setProcessingConsent] = useState(
       Boolean(profile?.consentAt),
@@ -1868,6 +1895,36 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
       if (fileInput.current) fileInput.current.value = "";
     }
   }
+  async function completeInterview(intake) {
+    setError(null);
+    setBusy("interview");
+    try {
+      const next = {
+        ...applyIntakeToProfile(draft, intake),
+        interviewCompleted: true,
+        confirmed: false,
+      };
+      const result = await api("/profile", {
+        method: "PUT",
+        body: next,
+      });
+      const saved = {
+        ...next,
+        ...result.profile,
+        preferences: {
+          ...blankProfile.preferences,
+          ...next.preferences,
+          ...result.profile?.preferences,
+        },
+      };
+      onDraftSaved?.(saved);
+      setDraft(saved);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy("");
+    }
+  }
   async function save(event) {
     event.preventDefault();
     setError(null);
@@ -1902,6 +1959,18 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
       setBusy("");
     }
   }
+  if (onboarding && !draft.interviewCompleted) {
+    return (
+      <div className="page profile-page">
+        <CareerInterview
+          initialValue={intakeFromProfile(draft)}
+          onComplete={completeInterview}
+          busy={busy === "interview"}
+          error={error}
+        />
+      </div>
+    );
+  }
   return (
     <div className="page profile-page">
       <div className="page-heading">
@@ -1914,7 +1983,7 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
           <h1>{onboarding ? "A shortlist that knows you." : "My profile"}</h1>
           <p>
             {onboarding
-              ? "Bring your experience. Tell us what matters. We’ll find the common ground."
+              ? "We kept what you told us. Upload your resume to add skills and experience without typing them again."
               : "Keep your experience and priorities up to date. Your saved applications stay with you."}
           </p>
         </div>
@@ -1930,7 +1999,8 @@ function ProfileScreen({ config, api, profile, onboarding, onSaved }) {
             <div>
               <h2>Your experience</h2>
               <p>
-                A resume gives us the starting point. You have the final say.
+                One upload fills in your career details. You review everything
+                before we search.
               </p>
             </div>
           </div>

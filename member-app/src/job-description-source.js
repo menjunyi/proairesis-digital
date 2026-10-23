@@ -105,8 +105,55 @@ function separator(name, closing, structured) {
   return " ";
 }
 
+function stripUnterminatedTags(input) {
+  const text = String(input ?? "");
+  let output = "", copyCursor = 0, searchCursor = 0;
+  while (searchCursor < text.length) {
+    const start = text.indexOf("<", searchCursor);
+    if (start < 0) break;
+    let nameStart = start + 1;
+    if (text[nameStart] === "/") nameStart += 1;
+    if (!/[A-Za-z]/.test(text[nameStart] ?? "")) {
+      searchCursor = start + 1;
+      continue;
+    }
+    let nameEnd = nameStart + 1;
+    while (/[\w-]/.test(text[nameEnd] ?? "")) nameEnd += 1;
+    const name = text.slice(nameStart, nameEnd), lower = name.toLowerCase();
+    const markerEnd = Math.min(text.length, nameEnd + 512);
+    const marker = text.slice(nameEnd, markerEnd);
+    const attributeLike = /^\s+(?:(?:hidden|open)\b|["']|[A-Za-z_:][\w:.-]*\s*=)/i.test(marker);
+    const probableHtml = name === lower && (UNSAFE_TAGS.has(lower) || INERT_TAGS.has(lower)
+      || VOID_TAGS.has(lower) || PRESENTATION_TAGS.has(lower)) || attributeLike;
+    if (!probableHtml) {
+      searchCursor = start + 1;
+      continue;
+    }
+    let quote = "", end = -1, nested = -1;
+    for (let cursor = nameEnd; cursor < text.length; cursor += 1) {
+      const character = text[cursor];
+      if (quote) {
+        if (character === quote) quote = "";
+        continue;
+      }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === ">") { end = cursor; break; }
+      else if (character === "<") { nested = cursor; break; }
+    }
+    if (end >= 0) {
+      searchCursor = end + 1;
+      continue;
+    }
+    output += `${text.slice(copyCursor, start)} `;
+    if (nested < 0) return output;
+    copyCursor = nested;
+    searchCursor = nested;
+  }
+  return output + text.slice(copyCursor);
+}
+
 function stripMarkup(input, { consumeUnclosed, structured }) {
-  let text = String(input ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, " ");
+  let text = stripUnterminatedTags(input).replace(/<!--[\s\S]*?(?:-->|$)/g, " ");
   const attributeTail = (tag, name) => tag.slice(1 + name.length, -1).replace(/\/\s*$/, "").trim();
   const blockEnds = new Map(), blockStacks = new Map(), blockTags = new RegExp(TAG_SOURCE, "g");
   for (let tag = blockTags.exec(text); tag; tag = blockTags.exec(text)) {
@@ -226,7 +273,7 @@ function stripMarkdownReferences(value) {
   if (!definitions.size) return text;
   text = text.replace(/!?\[([^\]\n]{1,999})\]\[([^\]\n]{0,999})\]/g, (match, label, reference) =>
     definitions.has(normalized(reference || label)) ? label : match);
-  return text.replace(/!?\[([^\]\n]{1,999})\](?![\[(])/g, (match, label) =>
+  return text.replace(/!?\[([^\]\n]{1,999})\](?![[(])/g, (match, label) =>
     definitions.has(normalized(label)) ? label : match);
 }
 

@@ -8,7 +8,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 function loadComponent(relativePath) {
-  const module = { exports: {} };
+  const componentModule = { exports: {} };
   const compiled = buildSync({
     entryPoints: [fileURLToPath(new URL(relativePath, import.meta.url))],
     bundle: true,
@@ -19,10 +19,10 @@ function loadComponent(relativePath) {
   }).outputFiles[0].text;
   runInNewContext(compiled, {
     require: createRequire(import.meta.url),
-    module,
-    exports: module.exports,
+    module: componentModule,
+    exports: componentModule.exports,
   });
-  return module.exports;
+  return componentModule.exports;
 }
 
 const { default: ProcessedJobDescription } = loadComponent("../src/ProcessedJobDescription.jsx");

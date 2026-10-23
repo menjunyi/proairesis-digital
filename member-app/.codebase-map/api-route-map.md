@@ -5,8 +5,8 @@
 | `OPTIONS` | `*` | Public | `CORS preflight` | Returns allowed methods and headers without invoking business logic. | `server/handler.mjs:18`; `inline` |
 | `GET` | `/api/health` | Public | `Inline health response` | Returns the runtime mode and health flag. | `server/handler.mjs:19`; `inline` |
 | `POST` | `/api/stripe/webhook` | Public, signed by Stripe | `webhook` | Verifies the Stripe signature and reconciles canonical billing state. | `server/handler.mjs:22`; `server/service.mjs:601; server/adapters.mjs:332-340` |
-| `POST` | `/api/guest/start` | Public guest | `startGuest` | Creates a rate-limited 24-hour guest session with an opaque token. | `server/handler.mjs:26`; `server/service.mjs:238-250` |
-| `POST` | `/api/guest/resume` | Public guest | `guestResume` | Validates and extracts a PDF or DOCX, then creates editable profile suggestions. | `server/handler.mjs:27`; `server/service.mjs:252-265` |
+| `POST` | `/api/guest/start` | Public guest | `startGuest` | Validates the bounded interview answers and creates a rate-limited 24-hour guest session with an opaque token; legacy three-field clients remain valid. | `server/handler.mjs`; `server/service.mjs` |
+| `POST` | `/api/guest/resume` | Public guest | `guestResume` | Persists optional interview edits, validates and extracts a PDF or DOCX, then merges resume evidence without replacing user-supplied constraints. | `server/handler.mjs`; `server/service.mjs` |
 | `PUT` | `/api/guest/profile` | Public guest | `saveGuestProfile` | Validates the reviewed profile, visa constraints, sponsorship need and terms acceptance. | `server/handler.mjs:28`; `server/service.mjs:267-279` |
 | `POST` | `/api/guest/profile` | Public guest | `saveGuestProfile` | Compatibility alias for guest profile confirmation. | `server/handler.mjs:28`; `server/service.mjs:267-279` |
 | `POST` | `/api/guest/search` | Public guest | `searchGuest` | Searches authorised ATS jobs, ranks high-fit results, stores at most 30 and returns five. | `server/handler.mjs:29`; `server/service.mjs:281-297` |

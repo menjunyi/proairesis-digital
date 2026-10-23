@@ -34,7 +34,7 @@ function sourceLines(source) {
 }
 
 function cleanInline(value) {
-  let text = stripJobDescriptionEmphasis(String(value || "")
+  const text = stripJobDescriptionEmphasis(String(value || "")
     .replace(/^(?:>\s*)+/, "")
     .replace(/^(?:[-+*•·]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/, "")
     .replace(/^\[[ xX]\]\s*/, ""))

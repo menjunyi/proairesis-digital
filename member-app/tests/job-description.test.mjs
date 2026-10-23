@@ -277,6 +277,7 @@ test("removes hidden source metadata while preserving visible technical examples
       `<div hidden>${hidden}</div>`,
       `<div aria-hidden="tr&#x75;e">${hidden}</div>`,
       `<div style="display:/**/none">${hidden}</div>`,
+      `<div hidden title="<component>">${hidden}</div>`,
       `<font title="${hidden}">Visible employer copy.</font>`,
       `[candidate]: <https://example.test/apply>`,
       `  "${hidden}"`,
@@ -284,6 +285,7 @@ test("removes hidden source metadata while preserving visible technical examples
       "> > * [x] ***Build React*** interfaces with ___TypeScript___ and AWS.",
       "Use arr[0](value) when processing application data.",
       "<img hidden src=x> Continue with visible delivery documentation.",
+      `<div title="${'<div title="'.repeat(100)}${hidden}`,
     ].join("\n"),
   });
   const output = JSON.stringify(result);

@@ -11,7 +11,9 @@ RoleClue is a React 19 and Vite 8 single-page application. CloudFront serves the
 | File | Role | Logic | Evidence |
 |---|---|---|---|
 | `src/App.jsx` | Frontend application controller | Selects guest/auth/payment/member states and owns the four member screens. | `src/App.jsx:265-1117` |
-| `src/GuestJourney.jsx` | Guest journey | Runs situation, resume, review and five-match discovery before registration. | `src/GuestJourney.jsx:505-648` |
+| `src/GuestJourney.jsx` | Guest journey | Runs interview, resume shortcut, combined review and five-match discovery before registration. | `src/GuestJourney.jsx` |
+| `src/CareerInterview.jsx` | Shared onboarding UI | Guides guest and signed-in users through goals, eligibility and practical constraints before resume upload. | `src/CareerInterview.jsx` |
+| `src/intake.js` | Interview state | Validates interview answers, builds the editable summary and applies user-supplied constraints to a profile without replacing resume evidence. | `src/intake.js` |
 | `src/api.js` | Browser transport | Adds Cognito tokens, request timeouts, idempotency headers, pagination and direct upload handling. | `src/api.js:6-467` |
 | `src/auth.js` | Authentication | Implements Cognito password flows, Google PKCE, refresh and stale-session fencing. | `src/auth.js:1-316` |
 | `src/ui-state.js` | Frontend policy/state | Centralises route gating, continuation recovery and safe merge decisions. | `src/ui-state.js:1-95` |
@@ -35,7 +37,7 @@ RoleClue is a React 19 and Vite 8 single-page application. CloudFront serves the
 ## Reading order
 
 1. `src/App.jsx:265-1117` for application states and page selection.
-2. `src/GuestJourney.jsx:505-648` for pre-registration discovery.
+2. `src/CareerInterview.jsx`, `src/intake.js` and `src/GuestJourney.jsx` for interview-first pre-registration discovery.
 3. `server/handler.mjs:8-86` for request and event dispatch.
 4. `server/service.mjs:97-601` for product rules.
 5. `server/adapters.mjs:10-342` and `server/store.mjs:1-50` for external and storage boundaries.

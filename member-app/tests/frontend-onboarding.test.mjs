@@ -50,6 +50,19 @@ test("guest browser state stores only the opaque token and navigation state", ()
   assert.doesNotMatch(sessionStorage.dump(), /must not be stored|Private name/);
 });
 
+test("guest navigation can return to the interview without storing its answers", () => {
+  const token = "i".repeat(48);
+  saveGuestState({
+    token,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    step: "situation",
+    location: "Private location",
+    limitations: "Private limitation",
+  });
+  assert.equal(readGuestState().step, "situation");
+  assert.doesNotMatch(sessionStorage.dump(), /Private location|Private limitation/);
+});
+
 test("expired guest state is removed", () => {
   saveGuestState({
     token: "x".repeat(48),
@@ -78,6 +91,13 @@ test("profile validation requires essential eligibility answers only", () => {
   assert.match(
     profileErrors({ ...profile, roleFamilies: [] })[0],
     /target role/i,
+  );
+  assert.match(
+    profileErrors({
+      ...profile,
+      roleFamilies: ["software", "data", "cloud", "security"],
+    })[0],
+    /no more than three/i,
   );
 });
 

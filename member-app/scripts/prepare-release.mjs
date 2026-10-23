@@ -13,6 +13,18 @@ const releasePathspecs = [
   ':/member-app/infra', ':/member-app/public', ':/member-app/scripts',
   ':/member-app/server', ':/member-app/src', ':/member-app/tests',
 ];
+const COMMIT_SHA = /^[a-f0-9]{40}$/;
+
+export function releaseSourceRevision(localRevision, env = process.env) {
+  if (!COMMIT_SHA.test(localRevision)) throw new Error('The checked-out release source has no valid Git revision.');
+  if (env.GITHUB_ACTIONS === 'true') {
+    if (env.GITHUB_REF !== 'refs/heads/main') throw new Error('GitHub Actions can prepare a release only from the main branch.');
+    if (!COMMIT_SHA.test(env.GITHUB_SHA ?? '') || env.GITHUB_SHA !== localRevision) {
+      throw new Error('The checked-out release source does not match the immutable GitHub Actions revision.');
+    }
+  }
+  return localRevision;
+}
 
 export function productionConfig(env = process.env) {
   const config = {
@@ -54,17 +66,9 @@ export async function prepareRelease() {
   const appDirectory = resolve(scriptDirectory, '..');
   const repository = execFileSync('git', ['rev-parse', '--show-toplevel'], {cwd: appDirectory, encoding: 'utf8'}).trim();
   const localRevision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: repository, encoding: 'utf8'}).trim();
-  const sourceRevision = execFileSync('git', ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], {
-    cwd: repository, encoding: 'utf8', env: {...process.env, GIT_TERMINAL_PROMPT: '0'},
-  }).trim().split(/\s+/)[0];
+  const sourceRevision = releaseSourceRevision(localRevision);
   const dirty = execFileSync('git', ['status', '--porcelain', '--', ...releasePathspecs], {cwd: repository, encoding: 'utf8'}).trim();
-  if (!/^[a-f0-9]{40}$/.test(localRevision) || !/^[a-f0-9]{40}$/.test(sourceRevision) || dirty) throw new Error('Commit the complete member-app release source before preparing a production release.');
-  try {
-    execFileSync('git', ['cat-file', '-e', `${sourceRevision}^{commit}`], {cwd: repository, stdio: 'ignore'});
-    execFileSync('git', ['diff', '--quiet', sourceRevision, localRevision, '--', ...releasePathspecs], {cwd: repository, stdio: 'ignore'});
-  } catch {
-    throw new Error('Fetch origin/main and make the complete release source match that published revision before preparing a release.');
-  }
+  if (dirty) throw new Error('Commit the complete member-app release source before preparing a production release.');
   if (!execFileSync('git', ['ls-files', ':/member-app/server/handler.mjs'], {cwd: repository, encoding: 'utf8'}).trim()) throw new Error('The member app is not tracked in source control.');
   execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
   const configJson = JSON.stringify(config);

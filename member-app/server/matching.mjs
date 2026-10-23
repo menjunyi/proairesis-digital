@@ -84,7 +84,7 @@ function evaluate(profile, job, now, explain) {
   if (profile.roleFamilies?.length && !profile.roleFamilies.includes(job.roleFamily)) {
     return reject('This role family is outside your selected target roles.', {text: 'The role family differs from your profile.', jobEvidence: job.roleFamily});
   }
-  const pref = profile.preferences ?? {}, req = {...(job.requirements ?? {})};
+  const pref = profile.preferences ?? {}, req = {...job.requirements};
   for(const [key,fallback] of [['citizenship','unknown'],['sponsorship','unknown'],['clearance','unknown'],['minimumYears',null]]){
     if(Object.hasOwn(job.requirementEvidence??{},key)&&!supportsRequirementEvidence(key,req[key],job.requirementEvidence[key])) req[key]=fallback;
   }

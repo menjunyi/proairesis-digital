@@ -151,11 +151,17 @@
 | `src/App.jsx` | imports | `src/billing-state.js` | Confirmed | `src/App.jsx:68` |
 | `src/App.jsx` | imports | `src/GuestJourney.jsx` | Confirmed | `src/App.jsx:75` |
 | `src/App.jsx` | imports | `src/guest-state.js` | Confirmed | `src/App.jsx:76` |
+| `src/App.jsx` | imports | `src/CareerInterview.jsx` | Confirmed | `src/App.jsx` |
+| `src/App.jsx` | imports | `src/intake.js` | Confirmed | `src/App.jsx` |
 | `src/App.jsx` | renders | `src/GuestJourney.jsx` | Confirmed | `src/App.jsx:75` |
+| `src/App.jsx` | renders | `src/CareerInterview.jsx` | Confirmed | `src/App.jsx` |
 | `src/App.jsx` | uses external service | `external:proairesis.digital` | Confirmed | `src/App.jsx:1391` |
 | `src/GuestJourney.jsx` | imports | `package:lucide-react` | Confirmed | `src/GuestJourney.jsx:2` |
 | `src/GuestJourney.jsx` | imports | `src/api.js` | Confirmed | `src/GuestJourney.jsx:20` |
 | `src/GuestJourney.jsx` | imports | `src/guest-state.js` | Confirmed | `src/GuestJourney.jsx:21` |
+| `src/GuestJourney.jsx` | imports | `src/CareerInterview.jsx` | Confirmed | `src/GuestJourney.jsx` |
+| `src/GuestJourney.jsx` | imports | `src/intake.js` | Confirmed | `src/GuestJourney.jsx` |
+| `src/CareerInterview.jsx` | imports | `src/intake.js` | Confirmed | `src/CareerInterview.jsx` |
 | `src/api.js` | imports | `src/auth.js` | Confirmed | `src/api.js:1` |
 | `src/api.js` | calls API | `endpoint:/config.json` | Confirmed | `src/api.js:204` |
 | `src/auth.js` | calls API | `endpoint:https://cognito-idp.${config.cognitoRegion}.amazonaws.com/` | Confirmed | `src/auth.js:50` |

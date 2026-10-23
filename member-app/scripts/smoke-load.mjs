@@ -387,8 +387,7 @@ export async function runRepresentativeLoad({
         failureKind: "scheduler",
       });
     } else {
-      let request;
-      request = Promise.resolve()
+      const request = Promise.resolve()
         .then(() => probeImpl({
           url,
           ...(path === HEALTH_PATH ? {} : { token }),
@@ -410,7 +409,7 @@ export async function runRepresentativeLoad({
     if ((index + 1) % (config.requestsPerSecond * 60) === 0)
       onProgress({ scheduledRequests: index + 1, plannedRequests: config.plannedRequests });
   }
-  await Promise.allSettled([...active]);
+  await Promise.allSettled(active);
   return summarizeLoad(results, {
     plannedRequests: config.plannedRequests,
     circuitBreakerTriggered,

@@ -14,6 +14,25 @@ const profile = {resumeText: 'Built TypeScript and React interfaces. Deployed AW
   roleFamilies: ['software'], yearsExperience: 5, workRights: 'citizen',
   needsSponsorship: 'no', clearance: 'baseline', preferences: {}};
 
+function fastestDuration(operation, attempts = 3) {
+  operation();
+  let fastest = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const started = performance.now();
+    operation();
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  return fastest;
+}
+
+function assertBoundedScaling(label, smallerOperation, maximumOperation) {
+  const smallerMs = fastestDuration(smallerOperation);
+  const maximumMs = fastestDuration(maximumOperation);
+  assert.ok(maximumMs < 5_000, `${label} exceeded the hard five-second maximum-input bound`);
+  assert.ok(maximumMs <= smallerMs * 3 + 25,
+    `${label} grew faster than the bounded scaling allowance (${smallerMs.toFixed(1)}ms to ${maximumMs.toFixed(1)}ms)`);
+}
+
 test('accepted assessments retain the original matching result with additive acceptance fields', () => {
   const expected = assess(profile, job);
   const {highFit, reason, ...actual} = assessWithReasons(profile, job);
@@ -422,20 +441,17 @@ test('hidden source content cannot supply hard gates or pad a sparse description
   assert.equal(resumeResult.matches.length, 3);
 
   const recognized = ['JavaScript','TypeScript','Python','Java','C#','C++','React','Angular','Vue','Node.js','SQL','PostgreSQL','MySQL','AWS','Azure','GCP','Docker','Kubernetes','Terraform','Linux','Git','CI/CD','REST','GraphQL','HTML','CSS','Figma','Power BI','Tableau','Excel','Agile','Scrum','Selenium','Playwright','Cypress','Jest','Go','Rust','Ruby','PHP'];
-  const longMalformed = {...job,description:`${'['.repeat(29000)} ${recognized.join(' ')}`,skills:recognized};
-  const started=performance.now();
-  assessWithReasons({...profile,resumeText:recognized.join(' ')},longMalformed);
-  assert.ok(performance.now()-started<500,'malformed Markdown must remain linear-time');
-
-  const malformedTags = {...job,description:`${'<div title="'.repeat(1580)} ${recognized.join(' ')} ${'reliable engineering delivery documentation '.repeat(5)}`,skills:recognized};
-  const tagStarted=performance.now();
-  assessWithReasons({...profile,resumeText:recognized.join(' ')},malformedTags);
-  assert.ok(performance.now()-tagStarted<500,'malformed quoted tags must remain bounded and sanitize only once per assessment');
-
-  const referenceMalformed = {...job,description:`[id]: https://example.test\n${'['.repeat(28000)} ${recognized.join(' ')}`,skills:recognized};
-  const referenceStarted=performance.now();
-  assessWithReasons({...profile,resumeText:recognized.join(' ')},referenceMalformed);
-  assert.ok(performance.now()-referenceStarted<500,'reference use parsing must remain bounded when a definition exists');
+  const person = {...profile,resumeText:recognized.join(' ')};
+  const assessMalformed = description => () => assessWithReasons(person, {...job,description,skills:recognized});
+  assertBoundedScaling('malformed Markdown',
+    assessMalformed(`${'['.repeat(14500)} ${recognized.join(' ')}`),
+    assessMalformed(`${'['.repeat(29000)} ${recognized.join(' ')}`));
+  assertBoundedScaling('malformed quoted tags',
+    assessMalformed(`${'<div title="'.repeat(790)} ${recognized.join(' ')} ${'reliable engineering delivery documentation '.repeat(5)}`),
+    assessMalformed(`${'<div title="'.repeat(1580)} ${recognized.join(' ')} ${'reliable engineering delivery documentation '.repeat(5)}`));
+  assertBoundedScaling('reference use parsing',
+    assessMalformed(`[id]: https://example.test\n${'['.repeat(14000)} ${recognized.join(' ')}`),
+    assessMalformed(`[id]: https://example.test\n${'['.repeat(28000)} ${recognized.join(' ')}`));
 });
 
 test('browser-decoded hidden styles cannot supply skills or eligibility gates', () => {

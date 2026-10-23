@@ -4,19 +4,22 @@
 
 Confidence: **Confirmed**
 
-1. Situation
-2. Guest session
-3. Resume extraction
-4. Human profile confirmation
-5. Authorised ATS search
-6. High-fit ranking
-7. Five visible matches
-8. Interested
-9. Cognito or Google sign-in
-10. Guest claim transaction
-11. Stripe plan gate
-12. Verified entitlement
-13. Application workspace
+1. Guided job-search interview
+2. Editable understanding summary
+3. Guest session
+4. Resume-shortcut explanation and consent
+5. Resume extraction
+6. Merge interview answers with resume evidence
+7. Human profile confirmation
+8. Authorised job search
+9. High-fit ranking
+10. Five visible matches
+11. Interested
+12. Cognito or Google sign-in
+13. Guest claim transaction
+14. Stripe plan gate
+15. Verified entitlement
+16. Application workspace
 
 Evidence: `src/GuestJourney.jsx:557-631`, `src/App.jsx:480-552`, `server/service.mjs:238-349`, `server/service.mjs:104-127`
 
@@ -24,14 +27,16 @@ Evidence: `src/GuestJourney.jsx:557-631`, `src/App.jsx:480-552`, `server/service
 
 Confidence: **Confirmed**
 
-1. Select PDF or DOCX
-2. Request upload grant
-3. Direct bounded S3 PUT
-4. Finalize upload
-5. Validate bytes and archive
-6. Extract text and suggestions
-7. User review
-8. Confirm profile
+1. Complete the guided job-search interview
+2. Save the incomplete profile with `interviewCompleted=true`
+3. Select PDF or DOCX
+4. Request upload grant
+5. Direct bounded S3 PUT
+6. Finalize upload
+7. Validate bytes and archive
+8. Extract text and suggestions without replacing interview constraints
+9. User review
+10. Confirm profile
 
 Evidence: `src/api.js:370-467`, `src/App.jsx:1773-1824`, `server/service.mjs:164-199`, `server/adapters.mjs:155-167`
 

@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { browserAwsProfile, browserTarget, browserProgram } from '../scripts/smoke-browser.mjs';
+import { browserAwsProfile, browserTarget, browserProgram, completeSignedInInterview } from '../scripts/smoke-browser.mjs';
+import { releaseSourceRevision } from '../scripts/prepare-release.mjs';
 import { hashDirectory, isProtectedReleaseVersion, protectedReleaseVersion, requireSafeStatefulChanges, rollbackHasSkippedResources, unsafeStatefulChanges, updateReadyStackStatus } from '../scripts/release-safety.mjs';
 import { workQueueUrl } from '../server/handler.mjs';
 
@@ -174,8 +175,44 @@ test('paid generations and recommendation refreshes select separate queues', () 
   assert.throws(() => workQueueUrl({ kind: 'unknown' }, env), /Unsupported async work kind/);
 });
 
-test('pull requests build validation artifacts without main-branch release provenance checks', () => {
+test('release preparation binds the manifest to the immutable checked-out revision', () => {
+  const revision = 'a'.repeat(40);
+  assert.equal(releaseSourceRevision(revision, {}), revision);
+  const mainEnvironment = {GITHUB_ACTIONS:'true',GITHUB_REF:'refs/heads/main',GITHUB_SHA:revision};
+  assert.equal(releaseSourceRevision(revision, mainEnvironment), revision);
+  assert.throws(() => releaseSourceRevision('not-a-revision', {}), /valid Git revision/);
+  assert.throws(() => releaseSourceRevision(revision, {...mainEnvironment,GITHUB_SHA:'b'.repeat(40)}),
+    /does not match the immutable GitHub Actions revision/);
+  assert.throws(() => releaseSourceRevision(revision, {...mainEnvironment,GITHUB_REF:'refs/heads/feature'}),
+    /only from the main branch/);
+  const source = readFileSync(new URL('../scripts/prepare-release.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /ls-remote/);
+});
+
+test('pull requests and non-main manual runs build validation-only artifacts', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/member-app-release.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /Build pull-request validation artifacts[\s\S]*?if: github\.event_name == 'pull_request'[\s\S]*?npm run build && npm run build:lambda && npm run infra:template/);
-  assert.match(workflow, /Prepare releasable main-branch artifacts[\s\S]*?if: github\.event_name != 'pull_request'[\s\S]*?npm run release:prepare/);
+  assert.match(workflow, /- run: npm ci\s+- run: npm run lint\s+- run: npm test/);
+  assert.match(workflow, /Build validation artifacts[\s\S]*?if: github\.event_name == 'pull_request' \|\| github\.ref != 'refs\/heads\/main'[\s\S]*?npm run build && npm run build:lambda && npm run infra:template/);
+  assert.match(workflow, /Prepare releasable main-branch artifacts[\s\S]*?if: github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main'[\s\S]*?npm run release:prepare/);
+});
+
+test('the broad staging workflow ignores member-app-only changes', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const ignoredMemberPaths = /paths-ignore:\s*\n\s*- 'member-app\/\*\*'\s*\n\s*- '\.github\/workflows\/member-app-release\.yml'/g;
+  assert.equal([...workflow.matchAll(ignoredMemberPaths)].length, 2);
+});
+
+test('the deployed browser smoke completes interview-first onboarding before resume upload', async () => {
+  const actions=[];
+  const page={
+    evaluate:async()=>true,
+    click:async selector=>actions.push(['click',selector]),
+    fill:async(selector,value)=>actions.push(['fill',selector,value]),
+    waitForFunction:async()=>actions.push(['wait']),
+  };
+  assert.equal(await completeSignedInInterview(page),true);
+  assert.deepEqual(actions.filter(([action])=>action==='fill'),[['fill','#interview-location','Sydney, NSW']]);
+  assert.ok(actions.some(([,selector])=>selector?.includes('Software engineering')));
+  assert.ok(actions.some(([,selector])=>selector?.includes('Use my resume as a shortcut')));
+  assert.equal(await completeSignedInInterview({evaluate:async()=>false}),false);
 });

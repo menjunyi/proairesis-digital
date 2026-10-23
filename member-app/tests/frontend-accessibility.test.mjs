@@ -22,7 +22,12 @@ runInNewContext(compiled, {
   exports: appModule.exports,
 });
 
-const { ApplicationWorkspace, AuthScreen, OpportunitiesScreen } = appModule.exports;
+const {
+  ApplicationWorkspace,
+  AuthScreen,
+  OpportunitiesScreen,
+  ProfileScreen,
+} = appModule.exports;
 const guestModule = { exports: {} };
 const guestCompiled = buildSync({
   entryPoints: [
@@ -39,7 +44,11 @@ runInNewContext(guestCompiled, {
   module: guestModule,
   exports: guestModule.exports,
 });
-const { GuestRestoreFailure, guestRestoreRecovery } = guestModule.exports;
+const {
+  GuestRestoreFailure,
+  guestInterviewSubmissionMode,
+  guestRestoreRecovery,
+} = guestModule.exports;
 const capabilities = {
   recommendations: false,
   guestDiscovery: false,
@@ -47,6 +56,15 @@ const capabilities = {
   billing: false,
   jobImport: false,
 };
+
+test("returning from resume reuses the existing private guest session", () => {
+  assert.equal(guestInterviewSubmissionMode(null), "start");
+  assert.equal(guestInterviewSubmissionMode({ token: "short" }), "start");
+  assert.equal(
+    guestInterviewSubmissionMode({ token: "g".repeat(48) }),
+    "resume",
+  );
+});
 
 test("authentication has one page heading and a main landmark", () => {
   const html = renderToStaticMarkup(
@@ -58,6 +76,34 @@ test("authentication has one page heading and a main landmark", () => {
   assert.match(html, /^<main class="auth-layout">/);
   assert.equal((html.match(/<h1(?:\s|>)/g) || []).length, 1);
   assert.match(html, /<h1 id="auth-title">Welcome back\.<\/h1>/);
+});
+
+test("signed-in onboarding interviews the user before showing resume upload", () => {
+  const onboarding = renderToStaticMarkup(
+    React.createElement(ProfileScreen, {
+      config: { mode: "production", capabilities },
+      api: async () => ({}),
+      profile: { confirmed: false },
+      onboarding: true,
+      onDraftSaved() {},
+      onSaved() {},
+    }),
+  );
+  assert.match(onboarding, /What kind of work would feel like the right next move\?/);
+  assert.doesNotMatch(onboarding, /id="resume-file"/);
+
+  const existingMember = renderToStaticMarkup(
+    React.createElement(ProfileScreen, {
+      config: { mode: "production", capabilities },
+      api: async () => ({}),
+      profile: { confirmed: true },
+      onboarding: false,
+      onDraftSaved() {},
+      onSaved() {},
+    }),
+  );
+  assert.match(existingMember, /<h1>My profile<\/h1>/);
+  assert.match(existingMember, /id="resume-file"/);
 });
 
 test("opportunity and application visual tabs expose their selected state", () => {

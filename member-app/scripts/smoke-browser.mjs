@@ -63,6 +63,44 @@ function report(checkName, result = "passed", screenshot) {
   );
 }
 
+export async function completeSignedInInterview(page) {
+  const interviewOpen = await page.evaluate(() =>
+    Boolean(document.querySelector("#interview-title")),
+  );
+  if (!interviewOpen) return false;
+
+  await page.click("loc=role:button[name='Software engineering']");
+  await page.click("loc=role:button[name='Continue the conversation']");
+  await page.waitForFunction(
+    () => document.querySelector("#interview-title")?.textContent?.includes("Where are you now"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.click("loc=role:button[name='I’m actively looking']");
+  await page.fill("#interview-location", "Sydney, NSW");
+  await page.click("loc=role:button[name='Continue']");
+  await page.waitForFunction(
+    () => document.querySelector("#interview-title")?.textContent?.includes("right to work"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.click("loc=role:button[name='Australian citizen']");
+  await page.click("loc=role:button[name='Continue']");
+  await page.waitForFunction(
+    () => document.querySelector("#interview-title")?.textContent?.includes("suitable job"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.click("loc=role:button[name='Show what you understood']");
+  await page.waitForFunction(
+    () => document.querySelector("#interview-title")?.textContent?.includes("Does this describe"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.click("loc=role:button[name='Use my resume as a shortcut']");
+  return true;
+}
+
 const sleep = (milliseconds) =>
   new Promise((resolveWait) =>
     setTimeout(resolveWait, Math.min(MAX_POLL_MS, milliseconds)),
@@ -275,6 +313,16 @@ async function browserRound(parameters) {
       await page.fill('input[type="email"]', parameters.email);
       await page.fill('input[type="password"]', parameters.password);
       await page.click("loc=role:button[name='Sign in']");
+      await page.waitForFunction(
+        () =>
+          Boolean(
+            document.querySelector("#resume-file") ||
+              document.querySelector("#interview-title"),
+          ),
+        undefined,
+        { timeout: 60_000 },
+      );
+      await completeSignedInInterview(page);
       await page.waitForSelector("#resume-file", {
         state: "attached",
         timeout: 60_000,

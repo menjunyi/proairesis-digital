@@ -33,7 +33,7 @@ export function readGuestState() {
   return {
     token: value.token,
     expiresAt: value.expiresAt || null,
-    step: ["resume", "review", "searching", "matches"].includes(value.step)
+    step: ["situation", "resume", "review", "searching", "matches"].includes(value.step)
       ? value.step
       : "resume",
   };
@@ -150,6 +150,8 @@ export function profileErrors(profile) {
   if (!profile?.location?.trim()) errors.push("Confirm your target location.");
   if (!Array.isArray(profile?.roleFamilies) || !profile.roleFamilies.length)
     errors.push("Choose at least one target role.");
+  else if (profile.roleFamilies.length > 3)
+    errors.push("Choose no more than three target roles.");
   if (
     ![
       "citizen",

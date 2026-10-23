@@ -1,8 +1,14 @@
 name: Test and release staging
 on:
   pull_request:
+    paths-ignore:
+      - 'member-app/**'
+      - '.github/workflows/member-app-release.yml'
   push:
     branches: [main]
+    paths-ignore:
+      - 'member-app/**'
+      - '.github/workflows/member-app-release.yml'
   workflow_dispatch:
 permissions:
   contents: read

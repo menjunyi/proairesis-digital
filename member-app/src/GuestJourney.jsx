@@ -18,6 +18,13 @@ import {
   X,
 } from "lucide-react";
 import { createGuestApi, fileToBase64, safeExternalUrl } from "./api.js";
+import CareerInterview from "./CareerInterview.jsx";
+import {
+  ROLE_FAMILY_OPTIONS,
+  SITUATION_OPTIONS,
+  createIntake,
+  eligibilityAfterWorkRights,
+} from "./intake.js";
 import {
   clearGuestState,
   guestStepFrom,
@@ -28,25 +35,9 @@ import {
   saveGuestState,
 } from "./guest-state.js";
 
-const ROLE_FAMILIES = [
-  ["software", "Software engineering"],
-  ["data", "Data and analytics"],
-  ["cloud", "Cloud and infrastructure"],
-  ["security", "Cybersecurity"],
-  ["quality", "Quality and testing"],
-  ["product", "Product"],
-  ["design", "Design"],
-  ["it-support", "IT support"],
-  ["business-analysis", "Business analysis"],
-];
-
 const GUEST_RESUME_MAX_BYTES = 4 * 1024 * 1024;
 
-const blankSituation = {
-  situation: "actively-looking",
-  location: "",
-  remote: false,
-};
+const blankSituation = createIntake();
 
 function formatSourceTime(value) {
   const time = Date.parse(value);
@@ -98,6 +89,12 @@ export function guestRestoreRecovery(error) {
   return [404, 410].includes(error?.status) ? "restart" : "retry";
 }
 
+export function guestInterviewSubmissionMode(session) {
+  return typeof session?.token === "string" && session.token.length >= 32
+    ? "resume"
+    : "start";
+}
+
 export function GuestRestoreFailure({ error, onRetry, onRestart }) {
   return (
     <section
@@ -143,7 +140,7 @@ function Field({ label, hint, children }) {
 }
 
 function Stepper({ step }) {
-  const labels = ["Your situation", "Your resume", "Confirm profile", "Your matches"];
+  const labels = ["Quick interview", "Resume shortcut", "Confirm profile", "Your matches"];
   const current = { situation: 1, resume: 2, review: 3, searching: 4, matches: 4 }[step] || 1;
   return (
     <div className="guest-step-progress">
@@ -191,68 +188,22 @@ function GuestShell({ step, onSignIn, children }) {
   );
 }
 
-function SituationStep({ value, setValue, busy, error, onSubmit }) {
-  return (
-    <section className="guest-card guest-situation" aria-labelledby="situation-title">
-      <p className="eyebrow">START WITH WHAT YOU NEED</p>
-      <h1 id="situation-title">What does your next move look like?</h1>
-      <p className="guest-lead">
-        Two quick answers give your resume a useful direction. You do not need an account yet.
-      </p>
-      <form onSubmit={onSubmit}>
-        <Field label="Where are you in your search?">
-          <select
-            value={value.situation}
-            onChange={(event) => setValue((current) => ({ ...current, situation: event.target.value }))}
-          >
-            <option value="actively-looking">Actively looking</option>
-            <option value="exploring">Exploring a move</option>
-            <option value="graduate">Graduate / first role</option>
-            <option value="career-change">Changing careers</option>
-            <option value="returning">Returning to work</option>
-          </select>
-        </Field>
-        <Field
-          label="Where do you want to work?"
-          hint="Enter an Australian city, state or region. Choose remote as well if you are open to Australia-wide remote roles."
-        >
-          <input
-            required
-            maxLength={200}
-            placeholder="For example, Melbourne, VIC"
-            value={value.location}
-            onChange={(event) => setValue((current) => ({ ...current, location: event.target.value }))}
-          />
-        </Field>
-        <label className="check-line guest-check">
-          <input
-            type="checkbox"
-            checked={value.remote}
-            onChange={(event) => setValue((current) => ({ ...current, remote: event.target.checked }))}
-          />
-          <span>Include remote roles available to people in Australia</span>
-        </label>
-        <ErrorBox error={error} />
-        <button className="button guest-primary" disabled={busy}>
-          {busy ? <><LoaderCircle className="spin" size={18} /> Saving</> : <>Continue to my resume <ArrowRight size={18} /></>}
-        </button>
-      </form>
-      <p className="guest-trust"><ShieldCheck size={16} /> We ask only for details that change which roles fit.</p>
-    </section>
-  );
-}
-
 function ResumeStep({ busy, error, onUpload, onBack }) {
   const [consent, setConsent] = useState(false);
   const [file, setFile] = useState(null);
   return (
     <section className="guest-card" aria-labelledby="resume-title">
       <button className="guest-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
-      <p className="eyebrow">LET YOUR RESUME DO THE WORK</p>
-      <h1 id="resume-title">Bring your experience. We’ll organise the starting point.</h1>
+      <p className="eyebrow">USE YOUR RESUME AS A SHORTCUT</p>
+      <h1 id="resume-title">Add the career evidence. Keep your needs in control.</h1>
       <p className="guest-lead">
-        RoleClue extracts a reviewable summary so you do not need to retype your career history.
+        You already told us what a suitable role needs to look like. One resume upload can now fill in supported skills, experience and likely role direction so you do not type them again.
       </p>
+      <ul className="guest-resume-benefits">
+        <li><Check size={17} /> We combine resume evidence with the goals and limits you just confirmed.</li>
+        <li><Check size={17} /> You review and correct the combined profile before any job search.</li>
+        <li><Check size={17} /> Match explanations and cover-letter drafts use the evidence you approve.</li>
+      </ul>
       <div className="guest-privacy-note">
         <ShieldCheck size={21} />
         <div>
@@ -297,8 +248,8 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
 function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
   const [draft, setDraft] = useState(() => ({
     ...initial,
-    workRights: !initial.confirmed && initial.workRights === "unknown" ? "" : initial.workRights || "",
-    needsSponsorship: !initial.confirmed && initial.needsSponsorship === "unknown" ? "" : initial.needsSponsorship || "",
+    workRights: !initial.confirmed && !initial.interviewCompleted && initial.workRights === "unknown" ? "" : initial.workRights || "",
+    needsSponsorship: !initial.confirmed && !initial.interviewCompleted && initial.needsSponsorship === "unknown" ? "" : initial.needsSponsorship || "",
   }));
   const acknowledgements = reviewAcknowledgements(initial);
   const [reviewed, setReviewed] = useState(acknowledgements.reviewed);
@@ -327,47 +278,66 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
     }));
     setReviewed(false);
   };
+  const setWorkRights = (value) => {
+    setDraft((current) => ({
+      ...current,
+      ...eligibilityAfterWorkRights(current, value),
+    }));
+    setReviewed(false);
+  };
   const toggleFamily = (family) => {
     const current = draft.roleFamilies || [];
+    if (!current.includes(family) && current.length >= 3) return;
     set("roleFamilies", current.includes(family) ? current.filter((value) => value !== family) : [...current, family]);
   };
   const errors = profileErrors(draft);
-  const showVisaLimitations = ["", "visa-limited", "unknown"].includes(draft.workRights);
+  const showVisaLimitations = ["", "visa-limited", "none", "unknown"].includes(draft.workRights);
   return (
     <section className="guest-card guest-review" aria-labelledby="review-title">
       <button className="guest-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
       <p className="eyebrow">YOU HAVE THE FINAL SAY</p>
-      <h1 id="review-title">Check the profile we found.</h1>
-      <p className="guest-lead">Correct anything that does not reflect your experience. We ask only the missing details that affect eligibility.</p>
+      <h1 id="review-title">Check the profile we built together.</h1>
+      <p className="guest-lead">We kept what you told us, then added the skills and experience supported by your resume. Correct anything that is not right.</p>
+      <div className="guest-review-source-heading">
+        <span>1</span>
+        <div>
+          <h2>What you told us</h2>
+          <p>Your goals and limits stay in control of the search.</p>
+        </div>
+      </div>
       <div className="profile-summary-grid">
-        <Field label="Name">
-          <input required maxLength={120} value={draft.name || ""} onChange={(event) => set("name", event.target.value)} />
-        </Field>
-        <Field label="Years of relevant experience" hint="Leave blank if you are unsure.">
-          <input type="number" min="0" max="70" step="0.5" value={draft.yearsExperience ?? ""} onChange={(event) => set("yearsExperience", event.target.value === "" ? null : Number(event.target.value))} />
-        </Field>
-        <Field label="Skills found in your resume" hint="Remove anything the document did not support.">
-          <input value={(draft.skills || []).join(", ")} onChange={(event) => set("skills", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
-        </Field>
         <Field label="Target location">
           <input required maxLength={200} value={draft.location || ""} onChange={(event) => setLocation(event.target.value)} />
         </Field>
+        <Field label="Where are you in your search?">
+          <select value={draft.situation || ""} onChange={(event) => set("situation", event.target.value)}>
+            {SITUATION_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </Field>
       </div>
+      <label className="check-line guest-check guest-review-remote">
+        <input type="checkbox" checked={draft.preferences?.includeRemote === true} onChange={(event) => setPreference("includeRemote", event.target.checked)} />
+        <span>Include remote roles available to people in Australia</span>
+      </label>
       <fieldset className="chip-field guest-roles">
-        <legend>Which role families should we search? <span>Choose one or more</span></legend>
+        <legend>Which role families should we search? <span>Choose up to three</span></legend>
         <div className="choice-chips">
-          {ROLE_FAMILIES.map(([value, label]) => (
-            <button key={value} type="button" className={`choice-chip ${(draft.roleFamilies || []).includes(value) ? "selected" : ""}`} aria-pressed={(draft.roleFamilies || []).includes(value)} onClick={() => toggleFamily(value)}>
-              {(draft.roleFamilies || []).includes(value) && <Check size={14} />} {label}
-            </button>
-          ))}
+          {ROLE_FAMILY_OPTIONS.map(([value, label]) => {
+            const selected = (draft.roleFamilies || []).includes(value);
+            const disabled = !selected && (draft.roleFamilies || []).length >= 3;
+            return (
+              <button key={value} type="button" disabled={disabled} className={`choice-chip ${selected ? "selected" : ""}`} aria-pressed={selected} onClick={() => toggleFamily(value)}>
+                {selected && <Check size={14} />} {label}
+              </button>
+            );
+          })}
         </div>
       </fieldset>
       <div className="essential-questions">
         <h2>Tell us about your right to work and availability</h2>
         <div className="profile-summary-grid">
           <Field label="What is your current right to work in Australia?">
-            <select required value={draft.workRights} onChange={(event) => set("workRights", event.target.value)}>
+            <select required value={draft.workRights} onChange={(event) => setWorkRights(event.target.value)}>
               <option value="" disabled>Select an option</option>
               <option value="unknown">I’m not sure</option>
               <option value="citizen">Australian citizen</option>
@@ -394,6 +364,24 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
         )}
         <Field label="When can you start, and are there any work arrangements you cannot accept? (Optional)" hint="Leave blank if none.">
           <textarea placeholder="For example: available from November, weekdays only, or unable to travel overnight." rows={3} maxLength={2000} value={draft.preferences?.limitations || ""} onChange={(event) => setPreference("limitations", event.target.value)} />
+        </Field>
+      </div>
+      <div className="guest-review-source-heading resume-evidence-heading">
+        <span>2</span>
+        <div>
+          <h2>What your resume added</h2>
+          <p>These details are suggestions from the document, not facts you must accept.</p>
+        </div>
+      </div>
+      <div className="profile-summary-grid">
+        <Field label="Name">
+          <input required maxLength={120} value={draft.name || ""} onChange={(event) => set("name", event.target.value)} />
+        </Field>
+        <Field label="Years of relevant experience" hint="Leave blank if you are unsure.">
+          <input type="number" min="0" max="70" step="0.5" value={draft.yearsExperience ?? ""} onChange={(event) => set("yearsExperience", event.target.value === "" ? null : Number(event.target.value))} />
+        </Field>
+        <Field label="Skills found in your resume" hint="Remove anything the document did not support.">
+          <input value={(draft.skills || []).join(", ")} onChange={(event) => set("skills", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
         </Field>
       </div>
       <details className="guest-resume-review">
@@ -578,8 +566,24 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     setError(null);
     guestApi("/guest/session", { token: session.token })
       .then((result) => {
-        setBundle(result.guest || result);
-        const next = guestStepFrom(result.guest || result);
+        const restoredBundle = result.guest || result;
+        setBundle(restoredBundle);
+        setSituation(createIntake({
+          ...restoredBundle,
+          ...restoredBundle.profile,
+          remote:
+            restoredBundle.remote ??
+            restoredBundle.profile?.preferences?.includeRemote,
+          limitations:
+            restoredBundle.limitations ??
+            restoredBundle.profile?.preferences?.limitations,
+          interviewCompleted:
+            restoredBundle.interviewCompleted ??
+            restoredBundle.profile?.interviewCompleted,
+        }));
+        const next = session.step === "situation"
+          ? "situation"
+          : guestStepFrom(restoredBundle);
         setStep(next === "searching" ? "review" : next);
       })
       .catch((failure) => {
@@ -593,7 +597,7 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
         }
       })
       .finally(() => setBusy(""));
-  }, [guestApi, restoreAttempt, session?.token]);
+  }, [guestApi, restoreAttempt, session?.step, session?.token]);
 
   function retryRestore() {
     restored.current = false;
@@ -619,15 +623,25 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     setStep(nextStep);
   }
 
-  async function start(event) {
-    event.preventDefault();
+  async function start(interview) {
     setBusy("start");
     setError(null);
     try {
-      const result = await guestApi("/guest/start", situation);
+      const completedInterview = {
+        ...createIntake(interview),
+        interviewCompleted: true,
+      };
+      if (guestInterviewSubmissionMode(session) === "resume") {
+        setSituation(completedInterview);
+        setBundle((current) => ({ ...current, ...completedInterview }));
+        persist("resume", bundle || {}, session.token);
+        return;
+      }
+      const result = await guestApi("/guest/start", completedInterview);
       const token = result.token;
       if (typeof token !== "string" || token.length < 32) throw new Error("The private guest session could not be created.");
-      setBundle(result.guest || { situation });
+      setSituation(completedInterview);
+      setBundle(result.guest || completedInterview);
       persist("resume", result, token);
     } catch (failure) {
       setError(failure);
@@ -645,7 +659,14 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     try {
       const dataBase64 = await fileToBase64(file);
       const contentType = extension === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      const result = await guestApi("/guest/resume", { token: session.token, consent, filename: file.name, contentType, dataBase64 });
+      const result = await guestApi("/guest/resume", {
+        token: session.token,
+        consent,
+        filename: file.name,
+        contentType,
+        dataBase64,
+        interview: situation,
+      });
       const nextBundle = result.guest || { ...bundle, profile: result.profile };
       setBundle(nextBundle);
       persist("review", result);
@@ -715,8 +736,8 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
   }
   return (
     <GuestShell step={step} onSignIn={onSignIn}>
-      {step === "situation" && <SituationStep value={situation} setValue={setSituation} busy={busy === "start"} error={error} onSubmit={start} />}
-      {step === "resume" && <ResumeStep busy={busy === "upload"} error={error} onUpload={upload} onBack={() => { clearGuestState(); setSession(null); setBundle(null); setStep("situation"); setError(null); }} />}
+      {step === "situation" && <CareerInterview initialValue={situation} busy={busy === "start"} error={error} guestMode onComplete={start} />}
+      {step === "resume" && <ResumeStep busy={busy === "upload"} error={error} onUpload={upload} onBack={() => { setSituation((current) => ({ ...current, interviewCompleted: true })); setStep("situation"); saveGuestState({ ...session, step: "situation" }); setError(null); }} />}
       {step === "review" && bundle?.profile && <ReviewStep key={bundle.profile.resumeText?.length || 0} initial={bundle.profile} busy={busy === "confirm"} error={error} onBack={() => { setStep("resume"); saveGuestState({ ...session, step: "resume" }); setError(null); }} onConfirm={confirm} />}
       {step === "searching" && <div className="guest-searching" role="status" aria-live="polite"><span><Search size={30} /><Sparkles size={20} /></span><h1>Finding the common ground.</h1><p>We are checking current Australian technology roles against the evidence you confirmed.</p><div><LoaderCircle className="spin" size={20} /> Searching and ranking high-fit roles</div></div>}
       {step === "matches" && <MatchesStep data={bundle} busy={busy} error={error} onIgnore={ignore} onInterested={interested} onRestart={() => { setStep("review"); saveGuestState({ ...session, step: "review" }); }} />}

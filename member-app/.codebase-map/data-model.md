@@ -3,7 +3,7 @@
 | Keyspace/store | Records | Purpose | Evidence |
 |---|---|---|---|
 | `USER#{sub}` | PROFILE, ENTITLEMENT, CONTINUATION, APP#, LETTER#, GEN#, DECISION#, IMPORTED_JOB#, upload, checkout and rate records | Member source of truth | `server/service.mjs:97-599` |
-| `GUEST#{sha256(token)}` | SESSION, JOB# and rate records with TTL | 24-hour guest discovery state; raw token is not the partition key | `server/guest-onboarding.mjs:6-29; server/service.mjs:222-349` |
+| `GUEST#{sha256(token)}` | SESSION, JOB# and rate records with TTL | 24-hour guest discovery state, including bounded interview answers and merged profile; raw token is not the partition key | `server/guest-onboarding.mjs`; `server/service.mjs` |
 | `GUEST_RATE#{HMAC(IP)}` | Per-action rate counters | Network-level abuse control without storing a raw IP key | `server/service.mjs:200-220` |
 | `FEED#catalog / FEED#snapshot#{id}` | STATUS, LOCK and JOB# records | Atomic daily feed snapshot switching | `server/adapters.mjs:109-150` |
 | `BILLING#customers / BILLING#locks` | Stripe customer mapping and reconciliation locks | Tenant-safe Stripe reconciliation | `server/adapters.mjs:230-340` |

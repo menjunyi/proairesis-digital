@@ -31,6 +31,10 @@ async function confirmedGuest(service){
   const uploaded=await service.guestResume({token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf',dataBase64:Buffer.from('%PDF-test').toString('base64')},sourceIp);
   const profile={...uploaded.profile,name:'Alice Example',location:'Sydney, Australia',roleFamilies:['software'],workRights:'visa-limited',needsSponsorship:'later',visaLimitations:'Maximum 40 hours per week',confirmed:true};
   const saved=await service.saveGuestProfile({token:started.token,profile,termsAccepted:true,reviewed:true},sourceIp);
+  assert.equal(saved.guest.workRights,'visa-limited');
+  assert.equal(saved.guest.needsSponsorship,'later');
+  assert.equal(saved.guest.visaLimitations,'Maximum 40 hours per week');
+  assert.equal(saved.guest.interviewCompleted,true);
   return {started,uploaded,saved};
 }
 
@@ -47,6 +51,129 @@ test('resume extraction does not mistake an Australian location for a person nam
   const suggestion=suggestProfileFromResume('Sydney Australia\nSoftware Engineer\nBuilt TypeScript and React systems.');
   assert.equal(suggestion.values.name,'');
   assert.equal(suggestion.values.location,'Sydney Australia');
+});
+
+test('completed guest interview answers survive resume extraction and explicit unknown answers stay valid',async()=>{
+  const {service}=await setup(),initial={
+    situation:'returning',location:'Brisbane, Australia',remote:false,roleFamilies:['data','cloud'],
+    workRights:'unknown',needsSponsorship:'unknown',visaLimitations:'Confirm my current visa work conditions.',
+    limitations:'No interstate relocation.',interviewCompleted:true,
+  };
+  const started=await service.startGuest(initial,'203.0.113.63');
+  assert.deepEqual(Object.fromEntries(Object.keys(initial).map(key=>[key,started.guest[key]])),initial);
+  const edited={...initial,location:'Melbourne, Australia',remote:true,roleFamilies:['data'],visaLimitations:'Maximum 40 hours per fortnight.',limitations:'Remote or Melbourne only.'};
+  const uploaded=await service.guestResume({
+    token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf',
+    dataBase64:Buffer.from('%PDF-test').toString('base64'),interview:edited,
+  },'203.0.113.63');
+  assert.deepEqual(Object.fromEntries(Object.keys(edited).map(key=>[key,uploaded.guest[key]])),edited);
+  assert.equal(uploaded.profile.name,'Alice Example');
+  assert.equal(uploaded.profile.yearsExperience,5);
+  assert.deepEqual(uploaded.profile.skills,parsed.skills);
+  assert.equal(uploaded.profile.location,edited.location);
+  assert.deepEqual(uploaded.profile.roleFamilies,edited.roleFamilies);
+  assert.equal(uploaded.profile.workRights,'unknown');
+  assert.equal(uploaded.profile.needsSponsorship,'unknown');
+  assert.equal(uploaded.profile.visaLimitations,edited.visaLimitations);
+  assert.equal(uploaded.profile.preferences.limitations,edited.limitations);
+  assert.deepEqual(uploaded.profile.preferences.locations,[edited.location]);
+  assert.equal(uploaded.profile.preferences.locationsRequired,true);
+  assert.equal(uploaded.profile.preferences.includeRemote,true);
+  assert.equal(uploaded.profile.interviewCompleted,true);
+  const restored=await service.readGuest({token:started.token},'203.0.113.63');
+  assert.deepEqual(Object.fromEntries(Object.keys(edited).map(key=>[key,restored.guest[key]])),edited);
+});
+
+test('guest interview accepts readable multiline limits but rejects unsafe control characters',async()=>{
+  const {service}=await setup(),valid={
+    situation:'actively-looking',location:'Sydney',remote:false,roleFamilies:['software'],
+    workRights:'visa-limited',needsSponsorship:'later',
+    visaLimitations:'Maximum 40 hours per fortnight.\nNo work before 8 am.',
+    limitations:'Sydney only.\r\nNo overnight travel.\tFlexible start date.',interviewCompleted:true,
+  };
+  const started=await service.startGuest(valid,'203.0.113.67');
+  assert.equal(started.guest.visaLimitations,valid.visaLimitations);
+  assert.equal(started.guest.limitations,valid.limitations);
+  await assert.rejects(
+    ()=>service.startGuest({...valid,limitations:'unsafe\u0000value'},'203.0.113.67'),
+    error=>error.status===400&&error.code==='INVALID_GUEST_START',
+  );
+});
+
+test('legacy guest start and resume payloads remain compatible',async()=>{
+  const {service}=await setup(),started=await service.startGuest({situation:'exploring',location:'',remote:false},'203.0.113.64');
+  assert.deepEqual({
+    situation:started.guest.situation,location:started.guest.location,remote:started.guest.remote,
+    roleFamilies:started.guest.roleFamilies,workRights:started.guest.workRights,
+    needsSponsorship:started.guest.needsSponsorship,visaLimitations:started.guest.visaLimitations,
+    limitations:started.guest.limitations,interviewCompleted:started.guest.interviewCompleted,
+  },{
+    situation:'exploring',location:'',remote:false,roleFamilies:[],workRights:'unknown',
+    needsSponsorship:'unknown',visaLimitations:'',limitations:'',interviewCompleted:false,
+  });
+  const uploaded=await service.guestResume({token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf',dataBase64:Buffer.from('%PDF-test').toString('base64')},'203.0.113.64');
+  assert.equal(uploaded.profile.location,'Sydney');
+  assert.deepEqual(uploaded.profile.roleFamilies,['software']);
+  assert.equal(uploaded.profile.workRights,'unknown');
+  assert.equal(uploaded.profile.needsSponsorship,'unknown');
+  assert.equal(uploaded.profile.interviewCompleted,false);
+  assert.equal(uploaded.profile.preferences.locationsRequired,true);
+});
+
+test('interview edits persist when resume extraction fails',async()=>{
+  const extractionError=Object.assign(new Error('Synthetic extraction failure'),{status:400,code:'INVALID_RESUME'});
+  const {service}=await setup({extract:async()=>{throw extractionError;}}),initial={
+    situation:'exploring',location:'Sydney',remote:false,roleFamilies:['software'],workRights:'visa-unrestricted',
+    needsSponsorship:'no',visaLimitations:'',limitations:'',interviewCompleted:true,
+  };
+  const started=await service.startGuest(initial,'203.0.113.66'),edited={...initial,location:'Perth, WA',remote:true,limitations:'Office attendance must stay within Perth.'};
+  await assert.rejects(()=>service.guestResume({
+    token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf',
+    dataBase64:Buffer.from('%PDF-test').toString('base64'),interview:edited,
+  },'203.0.113.66'),error=>error===extractionError);
+  const restored=await service.readGuest({token:started.token},'203.0.113.66');
+  assert.deepEqual(Object.fromEntries(Object.keys(edited).map(key=>[key,restored.guest[key]])),edited);
+  assert.equal(restored.guest.stage,'resume');
+  assert.equal(restored.profile,null);
+});
+
+test('guest interview input rejects unknown, contradictory and out-of-bounds values',async()=>{
+  const {service}=await setup();
+  const valid={situation:'actively-looking',location:'Sydney',remote:false,roleFamilies:['software'],workRights:'unknown',needsSponsorship:'unknown',visaLimitations:'',limitations:'',interviewCompleted:true};
+  await assert.rejects(()=>service.startGuest({...valid,unexpected:true},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_START');
+  await assert.rejects(()=>service.startGuest({...valid,roleFamilies:['software','data','cloud','security']},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_START');
+  await assert.rejects(()=>service.startGuest({...valid,workRights:'citizen',needsSponsorship:'yes'},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_START');
+  await assert.rejects(()=>service.startGuest({...valid,limitations:'x'.repeat(2001)},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_START');
+  const started=await service.startGuest(valid,'203.0.113.65'),resume={token:started.token,consent:true,filename:'resume.pdf',contentType:'application/pdf',dataBase64:Buffer.from('%PDF-test').toString('base64')};
+  await assert.rejects(()=>service.guestResume({...resume,extra:true},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_RESUME');
+  await assert.rejects(()=>service.guestResume({...resume,interview:{...valid,unknownField:'no'}},'203.0.113.65'),error=>error.status===400&&error.code==='INVALID_GUEST_RESUME');
+});
+
+test('signed-in interview completion persists before resume upload',async()=>{
+  const {service}=await setup(),saved=await service.saveProfile(user,{
+    situation:'career-change',location:'Canberra, ACT',roleFamilies:['cloud'],workRights:'permanent-resident',
+    needsSponsorship:'no',visaLimitations:'',preferences:{locations:['Canberra, ACT'],locationsRequired:true,includeRemote:true,limitations:'No interstate relocation.'},
+    interviewCompleted:true,confirmed:false,
+  });
+  assert.equal(saved.profile.interviewCompleted,true);
+  assert.equal(saved.profile.location,'Canberra, ACT');
+  assert.deepEqual(saved.profile.roleFamilies,['cloud']);
+  assert.equal((await service.account(user)).profile.interviewCompleted,true);
+});
+
+test('resume replacement grandfathers a confirmed profile created before interviews',async()=>{
+  const {store,service}=await setup(),legacy={
+    name:'Alice Example',email:user.email,resumeText:resume,skills:parsed.skills,roleFamilies:['software'],yearsExperience:5,
+    situation:'actively-looking',location:'Sydney',workRights:'visa-limited',needsSponsorship:'later',clearance:'unknown',
+    preferences:{locations:['Sydney'],locationsRequired:true,includeRemote:false,workplaceTypes:[],employmentTypes:[],roleTitles:[],minimumSalary:null,salaryPeriod:'year',seniority:[],relocation:false,limitations:''},
+    confirmed:true,consentAt:'2026-10-01T00:00:00.000Z',termsAcceptedAt:'2026-10-01T00:00:00.000Z',termsVersion:'legacy',
+  };
+  await store.transact([change('USER#alice','PROFILE',null,legacy)]);
+  const uploaded=await service.uploadResume(user,{consent:true,filename:'resume.pdf',contentType:'application/pdf',dataBase64:Buffer.from('%PDF-test').toString('base64')});
+  assert.equal(uploaded.profile.confirmed,false);
+  assert.equal(uploaded.profile.interviewCompleted,true);
+  assert.equal(uploaded.profile.workRights,legacy.workRights);
+  assert.equal(uploaded.profile.needsSponsorship,legacy.needsSponsorship);
 });
 
 test('guest intake fails before resume collection when live search is not approved',async()=>{

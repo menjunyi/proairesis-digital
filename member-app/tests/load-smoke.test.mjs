@@ -128,7 +128,7 @@ test("health probes accept only the production health payload delivered through 
     token,
     requestTimeoutMs: 5_000,
     fetchImpl: async (url, options) => {
-      authenticatedCalls.push({ url: String(url), options });
+      authenticatedCalls.push({ url: url.href, options });
       return new Response(JSON.stringify({
         mode: "production",
         profile: {},

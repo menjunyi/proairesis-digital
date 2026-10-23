@@ -18,7 +18,9 @@
 | `scripts/build-lambda.mjs` | JavaScript | Build pipeline | Bundles the Node.js Lambda with esbuild and creates the deployment ZIP. Located at `scripts/build-lambda.mjs`. | 1 | 6 |
 | `src/api.js` | JavaScript | Frontend API client | Sends authenticated and guest requests, paginates collections and manages resume uploads. Located at `src/api.js`. | 5 | 2 |
 | `server/ai-budget.mjs` | JavaScript | Budget control | Reserves and reconciles the shared external-AI daily budget. Located at `server/ai-budget.mjs`. | 4 | 3 |
-| `src/GuestJourney.jsx` | JavaScript | Frontend journey | Runs the unauthenticated situation, resume, confirmation and match flow. Located at `src/GuestJourney.jsx`. | 2 | 8 |
+| `src/GuestJourney.jsx` | JavaScript | Frontend journey | Runs the unauthenticated interview, resume shortcut, combined confirmation and match flow. Located at `src/GuestJourney.jsx`. | 4 | 8 |
+| `src/CareerInterview.jsx` | JavaScript | Frontend onboarding | Shared guided interview and editable understanding summary. Located at `src/CareerInterview.jsx`. | 2 | 0 |
+| `src/intake.js` | JavaScript | Frontend domain logic | Normalizes interview answers, validates required fields and merges explicit constraints into profiles. Located at `src/intake.js`. | 0 | 2 |
 | `scripts/validate-stripe-sandbox.mjs` | JavaScript | Other | Contains other code or project material. Located at `scripts/validate-stripe-sandbox.mjs`. | 1 | 10 |
 | `server/freehire.mjs` | JavaScript | Job source adapter | Normalises authorised direct-ATS Australian job search results. Located at `server/freehire.mjs`. | 2 | 6 |
 | `scripts/ai-budget.mjs` | JavaScript | Other | Contains other code or project material. Located at `scripts/ai-budget.mjs`. | 1 | 8 |
