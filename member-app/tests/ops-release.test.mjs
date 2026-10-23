@@ -110,9 +110,15 @@ test('deployment binds an origin-gate phase and enables stack termination protec
   assert.match(source, /apiOrigin\?\.CustomHeaders\?\.Items/);
   assert.doesNotMatch(source, /apiOrigin\?\.OriginCustomHeaders\?\.Items/);
   assert.match(source, /protectedStack\?\.StackId === stack\.StackId && updateReadyStackStatus\(protectedStack\.StackStatus\)/);
-  assert.match(source, /\['AVAILABLE', 'EXECUTE_COMPLETE'\]\.includes\(planned\.ExecutionStatus\)/);
-  assert.match(source, /if \(planned\.ExecutionStatus === 'AVAILABLE'\)/);
-  assert.match(source, /deployedParameters\.get\(key\) === plannedParameters\.get\(key\)/);
+  assert.match(source, /\['--plan', '--execute-existing', '--resume'\]/);
+  assert.match(source, /planned\.Status === 'CREATE_COMPLETE' && planned\.ExecutionStatus === 'AVAILABLE'/);
+  assert.doesNotMatch(source, /EXECUTE_COMPLETE/);
+  assert.match(source, /if \(mode === '--execute-existing'\)/);
+  assert.match(source, /deployedTemplate = awsJson\(\['cloudformation', 'get-template', '--stack-name', STACK, '--template-stage', 'Processed'\]\)/);
+  assert.match(source, /Resume requires the exact production stack to have completed its update with termination protection enabled/);
+  assert.match(source, /resumedPostDeployment: mode === '--resume'/);
+  assert.match(source, /deployedStack\?\.StackId === stack\.StackId && deployedStack\.StackStatus === 'UPDATE_COMPLETE'/);
+  assert.match(source, /deployedParameters\.get\(key\) === value && plannedParameters\.get\(key\) === value/);
   assert.match(source, /liveAlias\.FunctionVersion === functionVersion/);
   assert.match(source, /liveAlias\.Description === `RoleClue production \$\{manifest\.releaseId\}`/);
   assert.match(source, /origin-gate-\$\{apiOriginGateEnabled\}/);
@@ -121,6 +127,11 @@ test('deployment binds an origin-gate phase and enables stack termination protec
   const templateSource = readFileSync(new URL('../infra/template.mjs', import.meta.url), 'utf8');
   assert.match(templateSource, /VersioningConfiguration: \{ Status: 'Enabled' \}/);
   assert.match(templateSource, /S3ObjectVersion: ref\('ArtifactVersion'\)/);
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(packageJson.scripts['release:resume'], 'node scripts/deploy-production.mjs --resume');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /release:resume -- CHANGE_SET_NAME/);
+  assert.match(readme, /Resume never executes a change set/);
 });
 
 test('artifact versioning bootstrap is review-gated and limited to in-place retained resources', () => {

@@ -29,13 +29,13 @@ const releasePathspecs = [
   ':/member-app/server', ':/member-app/src', ':/member-app/tests',
 ];
 
-if (!['--plan', '--execute-existing'].includes(mode)) {
-  throw new Error('Usage: node scripts/deploy-production.mjs --plan | --execute-existing CHANGE_SET_NAME');
+if (!['--plan', '--execute-existing', '--resume'].includes(mode)) {
+  throw new Error('Usage: node scripts/deploy-production.mjs --plan | --execute-existing CHANGE_SET_NAME | --resume CHANGE_SET_NAME');
 }
 if (!['false', 'true'].includes(apiOriginGateEnabled)) {
   throw new Error('Set ROLECLUE_API_ORIGIN_GATE_ENABLED explicitly to true or false.');
 }
-if (mode === '--execute-existing' && !/^roleclue-[a-f0-9]{12}-gate-(?:off|on)$/.test(existingChangeSet || '')) {
+if (mode !== '--plan' && !/^roleclue-[a-f0-9]{12}-gate-(?:off|on)$/.test(existingChangeSet || '')) {
   throw new Error('Use the exact RoleClue change-set name printed by --plan.');
 }
 
@@ -206,7 +206,7 @@ async function fetchVerifiedArtifact(record, expectedKey, label) {
 const gatePhase = apiOriginGateEnabled === 'true' ? 'gate-on' : 'gate-off';
 const changeSetName = `roleclue-${manifest.releaseId.slice(0, 12)}-${gatePhase}`;
 const changeSetDescription = `RoleClue ${manifest.releaseId} from ${manifest.sourceRevision} with API origin gate ${apiOriginGateEnabled}`;
-if (mode === '--execute-existing') {
+if (mode !== '--plan') {
   requireValue(existingChangeSet === changeSetName, 'The reviewed change-set name does not match the selected API origin gate phase.');
 }
 const currentOriginGate = parameters.get('ApiOriginGateEnabled');
@@ -331,42 +331,63 @@ if (mode === '--plan') {
 }
 
 const planEvidence = JSON.parse(await readFile(resolve('build/deployment-plan.json'), 'utf8'));
-const planned = awsJson(['cloudformation', 'describe-change-set', '--stack-name', STACK, '--change-set-name', existingChangeSet]);
-const changeSetReady = planned.Status === 'CREATE_COMPLETE' &&
-  ['AVAILABLE', 'EXECUTE_COMPLETE'].includes(planned.ExecutionStatus);
-requireValue(changeSetReady,
-  'The reviewed change set is neither available for execution nor complete for a verified post-deployment resume.');
-requireValue(planned.Description === changeSetDescription, 'The change set does not match this release manifest and origin-gate phase.');
-requireValue(planEvidence.account === ACCOUNT && planEvidence.region === REGION && planEvidence.stackId === stack.StackId &&
-  planEvidence.changeSetName === existingChangeSet && planEvidence.changeSetId === planned.ChangeSetId &&
+requireValue(planEvidence.account === ACCOUNT && planEvidence.region === REGION && planEvidence.stack === STACK &&
+  planEvidence.stackId === stack.StackId && planEvidence.changeSetName === existingChangeSet &&
+  typeof planEvidence.changeSetId === 'string' &&
+  planEvidence.changeSetId.startsWith(`arn:aws:cloudformation:${REGION}:${ACCOUNT}:changeSet/${existingChangeSet}/`) &&
   planEvidence.releaseId === manifest.releaseId && planEvidence.sourceRevision === manifest.sourceRevision &&
-  planEvidence.apiOriginGateEnabled === apiOriginGateEnabled,
+  planEvidence.apiOriginGateEnabled === apiOriginGateEnabled && planEvidence.status === 'CREATE_COMPLETE' &&
+  planEvidence.executionStatus === 'AVAILABLE' && Number.isFinite(Date.parse(planEvidence.createdAt)) &&
+  Array.isArray(planEvidence.changes) && planEvidence.changes.every(change =>
+    ['Add', 'Modify', 'Remove', 'Import', 'Dynamic'].includes(change?.action) &&
+    typeof change.logicalResourceId === 'string' && change.logicalResourceId &&
+    typeof change.resourceType === 'string' && change.resourceType &&
+    [undefined, 'True', 'False', 'Conditional'].includes(change.replacement)),
 'The deployment plan evidence does not identify this exact stack, change set and release.');
-const reviewedChanges = summarizedChanges(planned);
-requireSafeStatefulChanges(reviewedChanges);
-requireValue(canonicalJson(planEvidence.changes) === canonicalJson(reviewedChanges), 'The reviewed resource changes no longer match the available change set.');
+requireSafeStatefulChanges(planEvidence.changes);
 const lambdaArtifact = await readFile(resolve('build/lambda.zip'));
 const siteArtifact = await readFile(resolve('build/site.zip'));
 const templateText = await readFile(resolve('build/app.template.json'), 'utf8');
 requireValue(planEvidence.artifacts?.lambda?.sha256 === sha256(lambdaArtifact) &&
   planEvidence.artifacts?.site?.sha256 === sha256(siteArtifact) &&
-  planEvidence.artifacts?.template?.sha256 === sha256(templateText),
+  planEvidence.artifacts?.template?.sha256 === sha256(templateText) &&
+  sha256(lambdaArtifact) === manifest.lambdaSha256 && sha256(templateText) === manifest.templateSha256,
 'A reviewed production artifact changed after the plan was created.');
-const reviewedTemplate = awsJson(['cloudformation', 'get-template', '--stack-name', STACK, '--change-set-name', existingChangeSet, '--template-stage', 'Processed']);
-const reviewedTemplateBody = typeof reviewedTemplate.TemplateBody === 'string'
-  ? JSON.parse(reviewedTemplate.TemplateBody) : reviewedTemplate.TemplateBody;
-requireValue(canonicalJson(reviewedTemplateBody) === canonicalJson(JSON.parse(templateText)), 'The reviewed CloudFormation template does not match the local release artifact.');
-const plannedParameters = new Map((planned.Parameters ?? []).map(item => [item.ParameterKey, item.ParameterValue]));
-requireValue(plannedParameters.get('ReleaseId') === manifest.releaseId &&
-  plannedParameters.get('ArtifactKey') === planEvidence.artifacts.lambda.key &&
-  plannedParameters.get('ArtifactVersion') === planEvidence.artifacts.lambda.versionId &&
-  plannedParameters.get('SiteArtifactVersion') === planEvidence.artifacts.site.versionId &&
-  plannedParameters.get('SiteArtifactVersionToken') === versionToken(planEvidence.artifacts.site.versionId) &&
-  plannedParameters.get('SiteArtifactSha256') === planEvidence.artifacts.site.sha256 &&
-  plannedParameters.get('FreehireEnabled') === 'true' && plannedParameters.get('FreehireLicenseApproved') === 'true' &&
-  plannedParameters.get('StripePortalConfigurationId') === stripePortalConfigurationId &&
-  plannedParameters.get('ApiOriginGateEnabled') === apiOriginGateEnabled,
-'The reviewed change set has unexpected production release parameters.');
+const expectedParameters = new Map([
+  ['ReleaseId', manifest.releaseId],
+  ['ArtifactKey', planEvidence.artifacts.lambda.key],
+  ['ArtifactVersion', planEvidence.artifacts.lambda.versionId],
+  ['SiteArtifactVersion', planEvidence.artifacts.site.versionId],
+  ['SiteArtifactVersionToken', versionToken(planEvidence.artifacts.site.versionId)],
+  ['SiteArtifactSha256', planEvidence.artifacts.site.sha256],
+  ['FreehireEnabled', 'true'],
+  ['FreehireLicenseApproved', 'true'],
+  ['FreehireLicenseReference', 'https://freehire.me/docs/api'],
+  ['AlarmEmail', 'support@proairesis.digital'],
+  ['StripePortalConfigurationId', stripePortalConfigurationId],
+  ['ApiOriginGateEnabled', apiOriginGateEnabled],
+]);
+let plannedParameters = expectedParameters;
+if (mode === '--execute-existing') {
+  const planned = awsJson(['cloudformation', 'describe-change-set', '--stack-name', STACK, '--change-set-name', existingChangeSet]);
+  requireValue(planned.Status === 'CREATE_COMPLETE' && planned.ExecutionStatus === 'AVAILABLE',
+    'The reviewed change set is not available for execution. Use --resume only after its stack update completed.');
+  requireValue(planned.Description === changeSetDescription && planEvidence.changeSetId === planned.ChangeSetId,
+    'The change set does not match this release manifest, saved plan and origin-gate phase.');
+  const reviewedChanges = summarizedChanges(planned);
+  requireSafeStatefulChanges(reviewedChanges);
+  requireValue(canonicalJson(planEvidence.changes) === canonicalJson(reviewedChanges),
+    'The reviewed resource changes no longer match the available change set.');
+  const reviewedTemplate = awsJson(['cloudformation', 'get-template', '--stack-name', STACK,
+    '--change-set-name', existingChangeSet, '--template-stage', 'Processed']);
+  const reviewedTemplateBody = typeof reviewedTemplate.TemplateBody === 'string'
+    ? JSON.parse(reviewedTemplate.TemplateBody) : reviewedTemplate.TemplateBody;
+  requireValue(canonicalJson(reviewedTemplateBody) === canonicalJson(JSON.parse(templateText)),
+    'The reviewed CloudFormation template does not match the local release artifact.');
+  plannedParameters = new Map((planned.Parameters ?? []).map(item => [item.ParameterKey, item.ParameterValue]));
+  requireValue([...expectedParameters].every(([key, value]) => plannedParameters.get(key) === value),
+    'The reviewed change set has unexpected production release parameters.');
+}
 const remoteLambda = await fetchVerifiedArtifact(planEvidence.artifacts.lambda, `${prefix}/lambda.zip`, 'lambda.zip');
 await rm(remoteLambda.root, { recursive: true, force: true });
 const remoteTemplate = await fetchVerifiedArtifact(planEvidence.artifacts.template, `${prefix}/app.template.json`, 'app.template.json');
@@ -374,21 +395,34 @@ await rm(remoteTemplate.root, { recursive: true, force: true });
 const remoteSite = await fetchVerifiedArtifact(planEvidence.artifacts.site, `${prefix}/site.zip`, 'site.zip');
 const reviewedSite = await extractVerifiedSiteArchive(remoteSite.path, manifest);
 await rm(remoteSite.root, { recursive: true, force: true });
-run(['cloudformation', 'update-termination-protection', '--enable-termination-protection', '--stack-name', STACK]);
-const protectedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
-requireValue(protectedStack?.StackId === stack.StackId && updateReadyStackStatus(protectedStack.StackStatus),
-  'The production stack changed state before the reviewed change set could execute.');
-requireValue(protectedStack.EnableTerminationProtection === true, 'Production stack termination protection was not enabled.');
-if (planned.ExecutionStatus === 'AVAILABLE') {
+let protectedStack;
+if (mode === '--execute-existing') {
+  run(['cloudformation', 'update-termination-protection', '--enable-termination-protection', '--stack-name', STACK]);
+  protectedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
+  requireValue(protectedStack?.StackId === stack.StackId && updateReadyStackStatus(protectedStack.StackStatus),
+    'The production stack changed state before the reviewed change set could execute.');
+  requireValue(protectedStack.EnableTerminationProtection === true, 'Production stack termination protection was not enabled.');
   run(['cloudformation', 'execute-change-set', '--stack-name', STACK, '--change-set-name', existingChangeSet]);
   run(['cloudformation', 'wait', 'stack-update-complete', '--stack-name', STACK], { timeout: 2_700_000 });
+} else {
+  protectedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
+  requireValue(protectedStack?.StackId === stack.StackId && protectedStack.StackStatus === 'UPDATE_COMPLETE' &&
+    protectedStack.EnableTerminationProtection === true,
+  'Resume requires the exact production stack to have completed its update with termination protection enabled.');
+  const deployedTemplate = awsJson(['cloudformation', 'get-template', '--stack-name', STACK, '--template-stage', 'Processed']);
+  const deployedTemplateBody = typeof deployedTemplate.TemplateBody === 'string'
+    ? JSON.parse(deployedTemplate.TemplateBody) : deployedTemplate.TemplateBody;
+  requireValue(canonicalJson(deployedTemplateBody) === canonicalJson(JSON.parse(templateText)),
+    'The deployed CloudFormation template does not match the reviewed local release artifact.');
 }
 
 const deployedStack = awsJson(['cloudformation', 'describe-stacks', '--stack-name', STACK]).Stacks?.[0];
-requireValue(deployedStack?.StackStatus === 'UPDATE_COMPLETE', 'The production stack update did not complete.');
+requireValue(deployedStack?.StackId === stack.StackId && deployedStack.StackStatus === 'UPDATE_COMPLETE' &&
+  deployedStack.EnableTerminationProtection === true,
+'The exact production stack did not complete its update with termination protection enabled.');
 const deployedParameters = new Map((deployedStack.Parameters ?? []).map(item => [item.ParameterKey, item.ParameterValue]));
-for (const key of ['ReleaseId', 'ArtifactKey', 'ArtifactVersion', 'SiteArtifactVersion', 'SiteArtifactVersionToken', 'SiteArtifactSha256', 'StripePortalConfigurationId', 'ApiOriginGateEnabled']) {
-  requireValue(deployedParameters.get(key) === plannedParameters.get(key),
+for (const [key, value] of expectedParameters) {
+  requireValue(deployedParameters.get(key) === value && plannedParameters.get(key) === value,
     `The deployed stack parameter ${key} does not match the reviewed release.`);
 }
 const deployedOutputs = Object.fromEntries((deployedStack.Outputs ?? []).map(item => [item.OutputKey, item.OutputValue]));
@@ -447,7 +481,7 @@ const evidence = {
   stackStatus: deployedStack.StackStatus, changeSetName: existingChangeSet,
   releaseId: manifest.releaseId, sourceRevision: manifest.sourceRevision,
   apiOriginGateEnabled, terminationProtection: protectedStack.EnableTerminationProtection,
-  resumedPostDeployment: planned.ExecutionStatus === 'EXECUTE_COMPLETE',
+  resumedPostDeployment: mode === '--resume',
   functionVersion, functionAliasArn, lambdaCodeSha256: codeSha256Hex(liveConfiguration.CodeSha256),
   artifacts: planEvidence.artifacts, siteUrl, invalidationId, completedAt: new Date().toISOString(),
 };
