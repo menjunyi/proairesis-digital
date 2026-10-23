@@ -3162,7 +3162,7 @@ function Dialog({ title, children, onClose, className = "", footer }) {
 
 function MatchEvidence({ match }) {
   return (
-    <div className="evidence-groups">
+    <section className="evidence-groups" aria-label="Job fit evidence">
       {[
         ["matches", "What matches", CheckCircle2, "positive"],
         ["gaps", "Gaps to consider", SlidersHorizontal, "gap"],
@@ -3207,7 +3207,7 @@ function MatchEvidence({ match }) {
           )}
         </section>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -3792,17 +3792,15 @@ export function ApplicationWorkspace({
             <FileText size={18} /> {pending ? "Preparing your draft" : "Write cover letter"}
           </button>
         </div>
-        {availability.status !== "available" && (
+        {availability.status === "closed" && (
           <div className="notice warning">
             <strong>{availability.title}</strong>
             <p>{availability.message}</p>
-            {availability.status === "closed" && (
-              <p>
-                You can still edit, copy or download existing letters and update
-                your application. New letter generation is unavailable for
-                closed listings.
-              </p>
-            )}
+            <p>
+              You can still edit, copy or download existing letters and update
+              your application. New letter generation is unavailable for
+              closed listings.
+            </p>
             {availability.checkedAt && (
               <small>Availability checked {date(availability.checkedAt)}</small>
             )}
@@ -3830,7 +3828,6 @@ export function ApplicationWorkspace({
       {tab === "details" ? (
         <div className="application-body">
           {pending && <p role="status">Your draft is being prepared. You can leave this page and return.</p>}
-          <ProcessedJobDescription job={job} className="application-job-description" />
           <section className="application-summary" aria-label="Job fit summary">
             <div className="summary-fit">
               <h3>What fits</h3>
@@ -3841,6 +3838,16 @@ export function ApplicationWorkspace({
               <p>{summary.gaps}</p>
             </div>
           </section>
+          {availability.status === "unknown" && (
+            <div className="notice neutral listing-availability-note">
+              <strong>{availability.title}</strong>
+              <p>{availability.message}</p>
+              {availability.checkedAt && (
+                <small>Last checked {date(availability.checkedAt)}</small>
+              )}
+            </div>
+          )}
+          <ProcessedJobDescription job={job} className="application-job-description" />
           <Field label="Your notes">
             <textarea
               rows="5"

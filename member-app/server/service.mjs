@@ -797,7 +797,6 @@ export function createService({store,mode='production',provider,dispatch,files,b
     return {
       legacy:{complete:legacyComplete,ids:legacyIds,checkedAt:iso()},
       recommendation:{
-        hasSnapshot:hasRecommendationSnapshot,
         ids:new Set(hasRecommendationSnapshot?recommendationState.ids:[]),
         sourceKinds:new Set(Array.isArray(recommendationState?.sourceKinds)?recommendationState.sourceKinds:[]),
         checkedAt:typeof recommendationState?.refreshedAt==='string'?recommendationState.refreshedAt:null,
@@ -808,14 +807,15 @@ export function createService({store,mode='production',provider,dispatch,files,b
     const expired=job.expiresAt&&Number.isFinite(Date.parse(job.expiresAt))&&Date.parse(job.expiresAt)<=Date.now();
     const imported=job.source==='user-provided';
     const recommendationSource=typeof job.source==='string'&&(job.source.startsWith('freehire:')||context.recommendation.sourceKinds.has(job.source));
-    const sourceTimestamp=job.lastSeenAt??job.updatedAt,sourceTime=Date.parse(sourceTimestamp),sourceAge=Date.now()-sourceTime;
+    const sourceTimestamp=job.lastSeenAt??job.updatedAt;
     if(expired)return {...job,availability:'closed',availabilityMessage:'This opportunity has expired. Your application and saved letters remain available.',availabilityCheckedAt:recommendationSource?context.recommendation.checkedAt??sourceTimestamp:context.legacy.checkedAt};
     if(imported)return {...job,availability:'unknown',availabilityMessage:'You supplied this job description. Check the original listing to confirm it is still open before applying.',availabilityCheckedAt:null};
     if(recommendationSource){
-      const inSnapshot=context.recommendation.ids.has(job.id),freshSavedSnapshot=!context.recommendation.hasSnapshot&&Number.isFinite(sourceTime)&&sourceAge>=0&&sourceAge<=RECOMMENDATION_STALE_MS;
-      const availability=inSnapshot||freshSavedSnapshot?'available':'unknown';
-      const message=inSnapshot?'This opportunity is present in your latest saved recommendation source snapshot.':freshSavedSnapshot?'This opportunity was present in the source snapshot saved when you selected it.':'This opportunity is not in your latest saved recommendation shortlist, so its current availability cannot be confirmed. Check the employer before applying.';
-      return {...job,availability,availabilityMessage:message,availabilityCheckedAt:inSnapshot?context.recommendation.checkedAt:sourceTimestamp??context.recommendation.checkedAt};
+      const inSnapshot=context.recommendation.ids.has(job.id),observationTimestamp=inSnapshot?context.recommendation.checkedAt??sourceTimestamp:sourceTimestamp,observationTime=Date.parse(observationTimestamp),observationAge=Date.now()-observationTime;
+      const recentlyObserved=Number.isFinite(observationTime)&&observationAge>=0&&observationAge<=RECOMMENDATION_STALE_MS;
+      const availability=recentlyObserved?'available':'unknown';
+      const message=recentlyObserved?'This opportunity was recently observed in the job feed.':'RoleClue has not recently confirmed this listing. Check the employer listing before applying.';
+      return {...job,availability,availabilityMessage:message,availabilityCheckedAt:observationTimestamp??context.recommendation.checkedAt};
     }
     const availability=context.legacy.complete&&!context.legacy.ids.has(job.id)?'closed':context.legacy.complete?'available':'unknown';
     const message=availability==='closed'?'This opportunity is no longer present in the latest complete job source. Your application and saved letters remain available.':availability==='unknown'?'Current availability could not be confirmed because the job source is unavailable or out of date. Check the employer before applying.':'This opportunity is present in the latest complete job source.';

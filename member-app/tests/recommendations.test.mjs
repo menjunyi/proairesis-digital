@@ -65,7 +65,13 @@ test('cached jobs support decisions while refresh preserves decisions and applic
   assert.ok((await service.opportunities(alice)).opportunities.every(item=>item.job.id!==interested.job.id&&item.job.id!==ignored.job.id));
   const ignoredAfterRefresh=await service.opportunities(alice,true);assert.equal(ignoredAfterRefresh.opportunities.some(item=>item.job.id===ignored.job.id),true);
   setLegacyFailing(true);
-  const application=(await service.applications(alice)).applications[0];assert.equal(application.job.id,interested.job.id);assert.equal(application.job.availability,'unknown');
+  const application=(await service.applications(alice)).applications[0];assert.equal(application.job.id,interested.job.id);assert.equal(application.job.availability,'available');assert.doesNotMatch(application.job.availabilityMessage,/latest saved recommendation shortlist|cannot be confirmed/i);
+  const applicationRow=await store.get('USER#alice',`APP#${interested.job.id}`),staleAt=new Date(Date.now()-21*60*60*1000).toISOString(),recentLastSeenAt=new Date().toISOString();
+  await store.transact([change(applicationRow.pk,applicationRow.sk,applicationRow,{...applicationRow.value,job:{...applicationRow.value.job,updatedAt:staleAt,lastSeenAt:recentLastSeenAt}})]);
+  assert.equal((await service.applications(alice)).applications[0].job.availability,'available');
+  const recentlyObservedRow=await store.get('USER#alice',`APP#${interested.job.id}`);
+  await store.transact([change(recentlyObservedRow.pk,recentlyObservedRow.sk,recentlyObservedRow,{...recentlyObservedRow.value,job:{...recentlyObservedRow.value.job,lastSeenAt:staleAt}})]);
+  const staleApplication=(await service.applications(alice)).applications[0];assert.equal(staleApplication.job.availability,'unknown');assert.match(staleApplication.job.availabilityMessage,/not recently confirmed/i);assert.doesNotMatch(staleApplication.job.availabilityMessage,/shortlist/i);
   await service.decision(alice,ignored.job.id,{decision:'undecided'});
   setLegacyFailing(false);
   assert.equal((await service.opportunities(alice,true)).opportunities.some(item=>item.job.id===ignored.job.id),false);

@@ -67,6 +67,14 @@ function withSessionStorage(run) {
   }
 }
 
+function assertBefore(html, first, second) {
+  const firstIndex = html.indexOf(first);
+  const secondIndex = html.indexOf(second);
+  assert.ok(firstIndex >= 0, `Expected markup to contain ${first}`);
+  assert.ok(secondIndex >= 0, `Expected markup to contain ${second}`);
+  assert.ok(firstIndex < secondIndex, `Expected ${first} before ${second}`);
+}
+
 test("processed description renders semantic overview and key-point groups without source decoration", () => {
   const html = renderToStaticMarkup(React.createElement(ProcessedJobDescription, { job }));
   assert.match(html, /<h3>Role overview<\/h3>/);
@@ -136,5 +144,73 @@ test("signed-in opportunity and application use the same structured presentation
     assert.match(html, /What they&#x27;re looking for/);
     assert.doesNotMatch(html, /Read the full job description|\*Key responsibilities/);
   }
+  assertBefore(opportunity, 'aria-label="Job fit evidence"', 'aria-label="Structured job description"');
+  assertBefore(application, 'aria-label="Job fit summary"', 'aria-label="Structured job description"');
+  assert.doesNotMatch(application, /Listing availability needs confirmation|not in your latest saved recommendation shortlist|Check the listing is still open|listing-availability-note/);
   assert.equal(job.description, description);
+});
+
+test("an uncertain listing uses a neutral source note after the fit summary", () => {
+  const match = { job, score: 86, matches: [], gaps: [], needsConfirmation: [] };
+  const application = withSessionStorage(() => renderToStaticMarkup(
+    React.createElement(ApplicationWorkspace, {
+      application: {
+        id: "synthetic-application",
+        status: "interested",
+        notes: "",
+        letters: [],
+        job: {
+          ...job,
+          availability: "unknown",
+          availabilityMessage: "RoleClue has not recently confirmed this listing. Check the employer listing before applying.",
+          availabilityCheckedAt: "2026-10-22T00:00:00.000Z",
+        },
+        match,
+      },
+      api: async () => ({}),
+      billing: { plan: "free", remaining: 0, limit: 0 },
+      onBilling() {},
+      onUpgrade() {},
+      onNotice() {},
+      onUpdate() {},
+      capabilities: { recommendations: true, coverLetters: false, billing: false, jobImport: true },
+    }),
+  ));
+  assertBefore(application, 'aria-label="Job fit summary"', "Check the listing is still open");
+  assertBefore(application, "Check the listing is still open", 'aria-label="Structured job description"');
+  assert.match(application, /notice neutral listing-availability-note/);
+  assert.doesNotMatch(application, /Listing availability needs confirmation|latest saved recommendation shortlist/);
+});
+
+test("a closed listing keeps its prominent warning above the application tabs", () => {
+  const match = { job, score: 86, matches: [], gaps: [], needsConfirmation: [] };
+  const application = withSessionStorage(() => renderToStaticMarkup(
+    React.createElement(ApplicationWorkspace, {
+      application: {
+        id: "synthetic-application",
+        status: "interested",
+        notes: "",
+        letters: [],
+        job: {
+          ...job,
+          availability: "closed",
+          availabilityMessage: "The source reports that this opportunity is closed.",
+          availabilityCheckedAt: "2026-10-23T00:00:00.000Z",
+        },
+        match,
+      },
+      api: async () => ({}),
+      billing: { plan: "free", remaining: 0, limit: 0 },
+      onBilling() {},
+      onUpgrade() {},
+      onNotice() {},
+      onUpdate() {},
+      capabilities: { recommendations: true, coverLetters: false, billing: false, jobImport: true },
+    }),
+  ));
+  assert.match(application, /notice warning/);
+  assert.match(application, /This opportunity is closed/);
+  assertBefore(application, "This opportunity is closed", 'class="tabs application-tabs"');
+  assertBefore(application, "This opportunity is closed", 'aria-label="Job fit summary"');
+  assert.doesNotMatch(application, /listing-availability-note/);
 });

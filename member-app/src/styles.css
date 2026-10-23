@@ -2068,6 +2068,10 @@ button svg {
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
+.notice.listing-availability-note {
+  display: block;
+  margin: 0 0 24px;
+}
 .application-job-description { margin: 0 0 24px; }
 .application-controls .button { font-size: var(--text-body); min-height: 44px; }
 .letter-allowance {

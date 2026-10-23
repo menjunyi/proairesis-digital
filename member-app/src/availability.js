@@ -17,7 +17,7 @@ export function listingAvailability(job, now = Date.now()) {
   }
   return {
     status: "unknown",
-    title: "Listing availability needs confirmation",
+    title: "Check the listing is still open",
     message:
       job.availabilityMessage ||
       "We could not confirm whether this listing is still open. Check the original listing before preparing another letter.",
