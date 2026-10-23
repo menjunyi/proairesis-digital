@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { browserAwsProfile, browserTarget, browserProgram, completeSignedInInterview } from '../scripts/smoke-browser.mjs';
 import { releaseSourceRevision } from '../scripts/prepare-release.mjs';
 import { hashDirectory, isProtectedReleaseVersion, protectedReleaseVersion, requireSafeStatefulChanges, rollbackHasSkippedResources, unsafeStatefulChanges, updateReadyStackStatus } from '../scripts/release-safety.mjs';
@@ -61,8 +62,8 @@ test('emergency rollback accepts only fully pinned gate-on releases', () => {
   assert.match(source, /protectedReleaseVersion\(target\.Description, releaseId\)/);
   assert.match(source, /--version-id', protectedRelease\.siteVersion/);
   assert.match(source, /protectedRelease\.siteSha256/);
-  assert.match(source, /'s3', 'cp', site, `s3:\/\/\$\{siteBucket\}\/`, '--recursive'/);
-  assert.match(source, /hashDirectory\(downloaded, \{ exclude: \['release\.json'\] \}\)/);
+  assert.match(source, /publishSiteWithCachePolicy\(run, site, siteBucket\)/);
+  assert.match(source, /verifyPublishedSiteFiles\(site, downloaded\)/);
   assert.match(source, /restoredAlias\.FunctionVersion === version/);
   assert.match(source, /publicRelease\.ok/);
 });
@@ -95,8 +96,8 @@ test('deployment binds an origin-gate phase and enables stack termination protec
   assert.match(source, /requireSafeStatefulChanges\(changes\)/);
   assert.match(source, /requireSafeStatefulChanges\(reviewedChanges\)/);
   assert.match(source, /extractVerifiedSiteArchive\(remoteSite\.path, manifest\)[\s\S]*?publishVerifiedSite\(reviewedSite\.site, siteBucket, manifest\)/);
-  assert.match(source, /'s3', 'cp', site, `s3:\/\/\$\{bucket\}\/`, '--recursive'/);
-  assert.match(source, /hashDirectory\(downloaded, \{ exclude: \['release\.json'\] \}\)/);
+  assert.match(source, /publishSiteWithCachePolicy\(run, site, bucket\)/);
+  assert.match(source, /verifyPublishedSiteFiles\(site, downloaded\)/);
   assert.doesNotMatch(source, /'s3', 'sync', resolve\('dist'\)/);
   assert.match(source, /get-bucket-versioning/);
   assert.match(source, /ArtifactVersion/);
@@ -147,8 +148,14 @@ test('browser smoke requires a portable task target and uses the normal AWS prof
   assert.deepEqual(browserTarget({ ROLECLUE_BROWSER_TASKSPACE_ID: '417' }), { taskSpaceId: 417, pageLabel: 'p1' });
   assert.equal(browserAwsProfile({ GITHUB_ACTIONS: 'true' }), '');
   assert.equal(browserAwsProfile({ AWS_PROFILE: 'release-review' }), 'release-review');
-  const program = browserProgram({ taskSpaceId: 417, pageLabel: 'acceptance-1', phase: 'preflight', siteUrl: 'https://app.proairesis.digital' });
-  assert.match(program, /^\(async \(\) => \{ await /);
+  const program = browserProgram({
+    taskSpaceId: 417,
+    pageLabel: 'acceptance-1',
+    phase: 'preflight',
+    siteUrl: 'https://app.proairesis.digital',
+    releaseId: 'a'.repeat(64),
+  });
+  assert.match(program, /^\(async \(\) => \{ const completeSignedInInterview = async function/);
   assert.match(program, /taskSpace\(parameters\.taskSpaceId\)/);
   assert.doesNotMatch(program, /taskSpace\(82\)/);
   assert.match(program, /roleclue\.session\.v1/);
@@ -156,12 +163,73 @@ test('browser smoke requires a portable task target and uses the normal AWS prof
   assert.match(program, /roleclue\.continuation\.v1/);
   assert.match(program, /Already have an account\? Sign in/);
   assert.match(program, /guestJourneyIsOpen/);
+  assert.match(program, /Network\.setCacheDisabled/);
+  assert.match(program, /roleclue_release/);
+  assert.doesNotMatch(program, /Network\.clearBrowserCache/);
+  assert.ok(program.indexOf('cacheDisabled: true') < program.indexOf('page.goto'));
+  assert.ok(program.lastIndexOf('cacheDisabled: false') > program.indexOf('page.goto'));
   assert.ok(program.indexOf('roleclue.guest.v1') < program.indexOf('guestJourneyIsOpen'));
   assert.ok(program.indexOf('roleclue.continuation.v1') < program.indexOf('guestJourneyIsOpen'));
   const smokeSource = readFileSync(new URL('../scripts/smoke-browser.mjs', import.meta.url), 'utf8');
   assert.match(smokeSource, /retainPrivateOutput\("stderr", chunk\)/);
   assert.match(smokeSource, /`\$\{stdout\}\\n\$\{stderr\}`/);
   assert.doesNotMatch(smokeSource, /console\.log\(stderr\)/);
+});
+
+test('the generated browser program binds and executes the interview helper', async () => {
+  const clicks=[];
+  const cdp=[];
+  const logs=[];
+  const page={
+    cdp:async(method,parameters)=>cdp.push([method,parameters]),
+    goto:async()=>{},
+    url:async()=> 'https://app.proairesis.digital/?roleclue_release=' + 'a'.repeat(64),
+    evaluate:async(callback)=>{
+      const source=callback.toString();
+      if(source.includes('/release.json')) return true;
+      if(source.includes('roleclue.guest.v1')) return false;
+      if(source.includes('!document.querySelector')) return false;
+      if(source.includes('document.querySelector("#interview-title")')) return true;
+      if(source.includes('ownSession:')) return {ownSession:false,ownForm:false};
+      if(source.includes('session?.email !== email')) return true;
+      return false;
+    },
+    waitForFunction:async()=>{},
+    waitForSelector:async(selector)=>{
+      if(selector==='#resume-file') throw new Error('synthetic stop after interview');
+    },
+    snapshot:async()=>{},
+    click:async(selector)=>clicks.push(selector),
+    fill:async()=>{},
+  };
+  const taskSpace=async()=>({
+    spaceId:417,
+    ownership:'agent',
+    pages:async()=>[{label:'p1'}],
+    page:()=>page,
+  });
+  const receiptPrefix='ROLECLUE_TEST_RECEIPT:';
+  const program=browserProgram({
+    taskSpaceId:417,
+    pageLabel:'p1',
+    phase:'upload',
+    siteUrl:'https://app.proairesis.digital',
+    releaseId:'a'.repeat(64),
+    receiptPrefix,
+  });
+  await runInNewContext(program,{taskSpace,URL,console:{log:value=>logs.push(value)}});
+  assert.ok(clicks.some(selector=>selector.includes('Software engineering')));
+  assert.ok(clicks.some(selector=>selector.includes('Use my resume as a shortcut')));
+  assert.equal(cdp.at(0)[0],'Network.enable');
+  assert.equal(cdp.at(0)[1],undefined);
+  assert.equal(cdp.at(1)[0],'Network.setCacheDisabled');
+  assert.equal(cdp.at(1)[1].cacheDisabled,true);
+  assert.equal(cdp.at(-1)[0],'Network.setCacheDisabled');
+  assert.equal(cdp.at(-1)[1].cacheDisabled,false);
+  assert.equal(logs.length,1);
+  const receipt=JSON.parse(logs[0].slice(receiptPrefix.length));
+  assert.equal(receipt.passed,false);
+  assert.equal(receipt.stage,'resume shortcut destination wait');
 });
 
 test('paid generations and recommendation refreshes select separate queues', () => {
@@ -204,15 +272,29 @@ test('the broad staging workflow ignores member-app-only changes', () => {
 
 test('the deployed browser smoke completes interview-first onboarding before resume upload', async () => {
   const actions=[];
+  const stages=[];
   const page={
     evaluate:async()=>true,
     click:async selector=>actions.push(['click',selector]),
     fill:async(selector,value)=>actions.push(['fill',selector,value]),
     waitForFunction:async()=>actions.push(['wait']),
   };
-  assert.equal(await completeSignedInInterview(page),true);
+  assert.equal(await completeSignedInInterview(page, stage => stages.push(stage)),true);
   assert.deepEqual(actions.filter(([action])=>action==='fill'),[['fill','#interview-location','Sydney, NSW']]);
   assert.ok(actions.some(([,selector])=>selector?.includes('Software engineering')));
   assert.ok(actions.some(([,selector])=>selector?.includes('Use my resume as a shortcut')));
+  assert.deepEqual(stages, [
+    'interview entry check',
+    'interview role selection',
+    'interview situation screen wait',
+    'interview situation and location',
+    'interview work-rights screen wait',
+    'interview work-rights selection',
+    'interview constraints screen wait',
+    'interview constraints confirmation',
+    'interview profile summary wait',
+    'interview resume shortcut selection',
+    'interview complete',
+  ]);
   assert.equal(await completeSignedInInterview({evaluate:async()=>false}),false);
 });

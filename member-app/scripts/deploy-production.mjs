@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { stripePortalConfigurationId } from '../infra/template.mjs';
 import { hashDirectory, requireSafeStatefulChanges, rollbackHasSkippedResources, updateReadyStackStatus } from './release-safety.mjs';
+import {
+  firstHashedAssetPath,
+  isImmutableAssetCacheControl,
+  isMutableSiteCacheControl,
+  publishSiteWithCachePolicy,
+  verifyPublishedSiteFiles,
+} from './site-cache-policy.mjs';
 
 const ACCOUNT = '037169690315';
 const REGION = 'ap-southeast-2';
@@ -102,8 +109,7 @@ async function extractVerifiedSiteArchive(archive, expectedManifest) {
   }
 }
 async function publishVerifiedSite(site, bucket, expectedManifest) {
-  run(['s3', 'cp', site, `s3://${bucket}/`, '--recursive', '--only-show-errors'], { timeout: 600_000 });
-  run(['s3', 'sync', site, `s3://${bucket}/`, '--delete', '--only-show-errors'], { timeout: 600_000 });
+  publishSiteWithCachePolicy(run, site, bucket);
   const root = await mkdtemp(join(tmpdir(), 'roleclue-published-site-'));
   const downloaded = join(root, 'site');
   try {
@@ -112,9 +118,9 @@ async function publishVerifiedSite(site, bucket, expectedManifest) {
     const deployedManifest = JSON.parse(await readFile(join(downloaded, 'release.json'), 'utf8'));
     requireValue(canonicalJson(deployedManifest) === canonicalJson(expectedManifest),
       'The published site manifest does not match the reviewed release.');
-    requireValue(sha256(await readFile(join(downloaded, 'index.html'))) === expectedManifest.indexSha256 &&
-      await hashDirectory(downloaded, { exclude: ['release.json'] }) === expectedManifest.siteContentSha256,
+    requireValue(sha256(await readFile(join(downloaded, 'index.html'))) === expectedManifest.indexSha256,
     'The complete published site does not match the reviewed release.');
+    await verifyPublishedSiteFiles(site, downloaded);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -415,12 +421,26 @@ run(['cloudfront', 'wait', 'invalidation-completed', '--distribution-id', distri
 const siteUrl = requireValue(deployedOutputs.SiteUrl, 'The site URL output is missing.');
 const health = await fetch(`${siteUrl}/api/health`, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
 requireValue(health.ok && (await health.json()).ok === true, 'The deployed health check failed.');
-const deployedRelease = await fetch(`${siteUrl}/release.json`, { cache: 'no-store', signal: AbortSignal.timeout(30_000) });
-requireValue(deployedRelease.ok && canonicalJson(await deployedRelease.json()) === canonicalJson(manifest),
+const freshRequest = () => ({ cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'Cache-Control': 'no-cache' } });
+const deployedRelease = await fetch(`${siteUrl}/release.json`, freshRequest());
+requireValue(deployedRelease.ok && isMutableSiteCacheControl(deployedRelease.headers.get('cache-control')) &&
+  canonicalJson(await deployedRelease.json()) === canonicalJson(manifest),
   'The deployed frontend release does not match the manifest.');
-const deployedIndex = await fetch(`${siteUrl}/index.html`, { cache: 'no-store', signal: AbortSignal.timeout(30_000) });
-requireValue(deployedIndex.ok && sha256(Buffer.from(await deployedIndex.arrayBuffer())) === manifest.indexSha256,
+const deployedConfig = await fetch(`${siteUrl}/config.json`, freshRequest());
+requireValue(deployedConfig.ok && isMutableSiteCacheControl(deployedConfig.headers.get('cache-control')),
+  'The deployed frontend configuration can remain stale in a browser.');
+if (deployedConfig.body) await deployedConfig.body.cancel();
+const deployedIndex = await fetch(`${siteUrl}/index.html`, freshRequest());
+const deployedIndexBytes = Buffer.from(await deployedIndex.arrayBuffer());
+requireValue(deployedIndex.ok && isMutableSiteCacheControl(deployedIndex.headers.get('cache-control')) &&
+  sha256(deployedIndexBytes) === manifest.indexSha256,
   'The deployed frontend entry point does not match the reviewed release.');
+const assetPath = requireValue(firstHashedAssetPath(deployedIndexBytes.toString('utf8')),
+  'The deployed frontend entry point has no hashed asset reference.');
+const deployedAsset = await fetch(`${siteUrl}${assetPath}`, freshRequest());
+requireValue(deployedAsset.ok && isImmutableAssetCacheControl(deployedAsset.headers.get('cache-control')),
+  'The deployed hashed frontend asset does not have an immutable cache policy.');
+if (deployedAsset.body) await deployedAsset.body.cancel();
 
 const evidence = {
   account: ACCOUNT, region: REGION, stackId: deployedStack.StackId,

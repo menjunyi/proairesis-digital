@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { isMutableSiteCacheControl } from "./site-cache-policy.mjs";
 
 const HEX_40 = /^[a-f0-9]{40}$/;
 const HEX_64 = /^[a-f0-9]{64}$/;
@@ -83,6 +84,10 @@ export async function verifyLiveRelease({
     releaseResponse.headers.get("x-amz-cf-id"),
     "Release manifest did not come through CloudFront",
   );
+  check(
+    isMutableSiteCacheControl(releaseResponse.headers.get("cache-control")),
+    "Release manifest can remain stale in a browser",
+  );
   const manifest = await boundedJson(releaseResponse, check);
   check(manifest?.version === 3, "Deployed release manifest version is invalid");
   check(
@@ -139,11 +144,32 @@ export async function verifyLiveRelease({
     indexResponse.headers.get("x-amz-cf-id"),
     "Frontend entry point did not come through CloudFront",
   );
+  check(
+    isMutableSiteCacheControl(indexResponse.headers.get("cache-control")),
+    "Frontend entry point can remain stale in a browser",
+  );
   const indexBytes = await boundedBody(indexResponse, check, 2 * 1024 * 1024, "Frontend entry point");
   check(
     createHash("sha256").update(indexBytes).digest("hex") === manifest.indexSha256,
     "Deployed frontend entry point does not match the release manifest",
   );
+
+  const configResponse = await fetchImpl(`${siteUrl}/config.json`, {
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+    headers: { "Cache-Control": "no-cache" },
+  });
+  check(configResponse.ok, "Deployed frontend configuration could not be read");
+  check(
+    configResponse.headers.get("x-amz-cf-id"),
+    "Frontend configuration did not come through CloudFront",
+  );
+  check(
+    isMutableSiteCacheControl(configResponse.headers.get("cache-control")),
+    "Frontend configuration can remain stale in a browser",
+  );
+  if (configResponse.body) await configResponse.body.cancel();
 
   const alias = await aws("lambda", "get-alias", {
     FunctionName: outputs.FunctionName,

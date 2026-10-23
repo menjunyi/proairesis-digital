@@ -14,6 +14,7 @@ import {
 import { stripePortalConfigurationId } from "../infra/template.mjs";
 import { syntheticResumePdf } from "./smoke-cloud.mjs";
 import { verifyLiveRelease, writeSmokeEvidence } from "./smoke-evidence.mjs";
+import { isMutableSiteCacheControl } from "./site-cache-policy.mjs";
 
 // Deliberately excluded from npm test and deployment. Review the deployment,
 // then opt in: ROLECLUE_RUN_BROWSER_SMOKE=1 node scripts/smoke-browser.mjs
@@ -63,41 +64,52 @@ function report(checkName, result = "passed", screenshot) {
   );
 }
 
-export async function completeSignedInInterview(page) {
+export async function completeSignedInInterview(page, onStage = () => {}) {
+  onStage("interview entry check");
   const interviewOpen = await page.evaluate(() =>
     Boolean(document.querySelector("#interview-title")),
   );
   if (!interviewOpen) return false;
 
+  onStage("interview role selection");
   await page.click("loc=role:button[name='Software engineering']");
   await page.click("loc=role:button[name='Continue the conversation']");
+  onStage("interview situation screen wait");
   await page.waitForFunction(
     () => document.querySelector("#interview-title")?.textContent?.includes("Where are you now"),
     undefined,
     { timeout: 30_000 },
   );
+  onStage("interview situation and location");
   await page.click("loc=role:button[name='I’m actively looking']");
   await page.fill("#interview-location", "Sydney, NSW");
   await page.click("loc=role:button[name='Continue']");
+  onStage("interview work-rights screen wait");
   await page.waitForFunction(
     () => document.querySelector("#interview-title")?.textContent?.includes("right to work"),
     undefined,
     { timeout: 30_000 },
   );
+  onStage("interview work-rights selection");
   await page.click("loc=role:button[name='Australian citizen']");
   await page.click("loc=role:button[name='Continue']");
+  onStage("interview constraints screen wait");
   await page.waitForFunction(
     () => document.querySelector("#interview-title")?.textContent?.includes("suitable job"),
     undefined,
     { timeout: 30_000 },
   );
+  onStage("interview constraints confirmation");
   await page.click("loc=role:button[name='Show what you understood']");
+  onStage("interview profile summary wait");
   await page.waitForFunction(
     () => document.querySelector("#interview-title")?.textContent?.includes("Does this describe"),
     undefined,
     { timeout: 30_000 },
   );
+  onStage("interview resume shortcut selection");
   await page.click("loc=role:button[name='Use my resume as a shortcut']");
+  onStage("interview complete");
   return true;
 }
 
@@ -250,7 +262,8 @@ async function boundedJson(response) {
 async function browserRound(parameters) {
   let stage = `Configured browser TaskSpace ${parameters.taskSpaceId}/${parameters.pageLabel} is unavailable. Check ROLECLUE_BROWSER_TASKSPACE_ID and ROLECLUE_BROWSER_PAGE_LABEL`,
     page,
-    observerInstalled = false;
+    observerInstalled = false,
+    cacheDisabled = false;
   let outcome = { passed: false, stage },
     primaryError;
   try {
@@ -264,13 +277,35 @@ async function browserRound(parameters) {
     if (!pages.some((item) => item.label === parameters.pageLabel))
       throw new Error("Missing page");
     page = task.page(parameters.pageLabel);
-    stage = "deployed signed-out page";
-    await page.goto(parameters.siteUrl, {
+    stage = "browser cache bypass";
+    await page.cdp("Network.enable");
+    await page.cdp("Network.setCacheDisabled", { cacheDisabled: true });
+    cacheDisabled = true;
+    const pinnedUrl = new URL(parameters.siteUrl);
+    pinnedUrl.searchParams.set("roleclue_release", parameters.releaseId);
+    stage = "pinned release navigation";
+    await page.goto(pinnedUrl.href, {
       timeout: 30_000,
       waitUntil: "domcontentloaded",
     });
     if (new URL(await page.url()).origin !== parameters.siteUrl)
       throw new Error("Wrong origin");
+    stage = "pinned release verification";
+    const pinnedReleaseLoaded = await page.evaluate(async (releaseId) => {
+      const url = new URL("/release.json", location.origin);
+      url.searchParams.set("roleclue_release", releaseId);
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const cacheControl = response.headers.get("cache-control")?.toLowerCase() ?? "";
+      if (!response.ok || !cacheControl.split(",").map((value) => value.trim()).includes("no-store"))
+        return false;
+      const manifest = await response.json();
+      return manifest?.releaseId === releaseId;
+    }, parameters.releaseId);
+    if (!pinnedReleaseLoaded) throw new Error("Wrong release");
+    stage = "signed-out state check";
     const occupied = await page.evaluate(() =>
       Boolean(
         sessionStorage.getItem("roleclue.session.v1") ||
@@ -279,6 +314,7 @@ async function browserRound(parameters) {
       ),
     );
     if (occupied) throw new Error("Existing browser state; do not change it");
+    stage = "signed-out account entry wait";
     await page.waitForFunction(
       () =>
         Boolean(document.querySelector('input[type="email"]')) ||
@@ -294,10 +330,12 @@ async function browserRound(parameters) {
       () => !document.querySelector('input[type="email"]'),
     );
     if (guestJourneyIsOpen) {
+      stage = "signed-out account entry selection";
       await page.click(
         "loc=role:button[name='Already have an account? Sign in']",
       );
     }
+    stage = "sign-in form wait";
     await page.waitForSelector('input[type="email"]', {
       state: "visible",
       timeout: 30_000,
@@ -309,10 +347,11 @@ async function browserRound(parameters) {
         stage: "existing signed-out browser page verified",
       };
     } else {
-      stage = "normal UI sign-in";
+      stage = "sign-in form submission";
       await page.fill('input[type="email"]', parameters.email);
       await page.fill('input[type="password"]', parameters.password);
       await page.click("loc=role:button[name='Sign in']");
+      stage = "post-sign-in onboarding wait";
       await page.waitForFunction(
         () =>
           Boolean(
@@ -322,7 +361,11 @@ async function browserRound(parameters) {
         undefined,
         { timeout: 60_000 },
       );
-      await completeSignedInInterview(page);
+      stage = "post-sign-in onboarding loaded";
+      await completeSignedInInterview(page, (nextStage) => {
+        stage = nextStage;
+      });
+      stage = "resume shortcut destination wait";
       await page.waitForSelector("#resume-file", {
         state: "attached",
         timeout: 60_000,
@@ -567,13 +610,25 @@ async function browserRound(parameters) {
         : "synthetic browser session cleanup",
     };
   }
+  if (page && cacheDisabled) {
+    try {
+      await page.cdp("Network.setCacheDisabled", { cacheDisabled: false });
+    } catch {
+      outcome = {
+        passed: false,
+        stage: outcome.passed
+          ? "browser cache bypass cleanup"
+          : `${outcome.stage}; browser cache bypass cleanup also failed`,
+      };
+    }
+  }
   // This is the only child output consumed by the parent. No credentials,
   // tokens, URLs with signatures, request bodies, snapshots or errors escape.
   console.log(parameters.receiptPrefix + JSON.stringify(outcome));
 }
 
 export function browserProgram(parameters) {
-  return `(async () => { await (${browserRound.toString()})(${JSON.stringify(parameters)}); })();\n`;
+  return `(async () => { const completeSignedInInterview = ${completeSignedInInterview.toString()}; await (${browserRound.toString()})(${JSON.stringify(parameters)}); })();\n`;
 }
 
 async function runBrowser(parameters, control) {
@@ -829,12 +884,15 @@ export async function runBrowserSmoke(env = process.env) {
     ExpectedBucketOwner: ACCOUNT,
   });
   const publicConfigResponse = await fetch(`${siteUrl}/config.json`, {
+    cache: "no-store",
     redirect: "error",
     signal: AbortSignal.timeout(30_000),
+    headers: { "Cache-Control": "no-cache" },
   });
   const publicConfig = await boundedJson(publicConfigResponse);
   check(
     publicConfigResponse.ok &&
+      isMutableSiteCacheControl(publicConfigResponse.headers.get("cache-control")) &&
       publicConfig.mode === "production" &&
       publicConfig.cognitoRegion === REGION &&
       publicConfig.cognitoClientId === outputs.CognitoClientId &&
@@ -952,7 +1010,7 @@ export async function runBrowserSmoke(env = process.env) {
   try {
     checkContinue();
     const preflight = await runBrowser(
-      { phase: "preflight", siteUrl, ...browserTargetConfig },
+      { phase: "preflight", siteUrl, releaseId: liveRelease.manifest.releaseId, ...browserTargetConfig },
       control,
     );
     check(preflight.passed, preflight.stage);
@@ -995,6 +1053,7 @@ export async function runBrowserSmoke(env = process.env) {
       {
         phase: "upload",
         siteUrl,
+        releaseId: liveRelease.manifest.releaseId,
         ...browserTargetConfig,
         email: identity.email,
         password: identity.password,

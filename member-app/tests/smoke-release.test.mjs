@@ -65,12 +65,16 @@ function fixture(overrides = {}) {
       ...overrides.outputs,
     },
     fetchImpl: async (url) => {
-      const body = String(url).endsWith("/release.json")
+      const path = new URL(String(url)).pathname;
+      const body = path === "/release.json"
         ? JSON.stringify(manifest)
         : overrides.indexBytes ?? indexBytes;
       return new Response(body, {
           status: 200,
-          headers: { "x-amz-cf-id": "synthetic-cloudfront-request" },
+          headers: {
+            "x-amz-cf-id": "synthetic-cloudfront-request",
+            "cache-control": overrides.cacheControl ?? "no-store, max-age=0, must-revalidate",
+          },
         });
     },
     aws: async (service, operation, input) => {
@@ -143,6 +147,19 @@ test("live release verification rejects an alias or code hash mismatch", async (
       expectedReleaseId: releaseId,
     }),
     /Live Lambda code does not match/,
+  );
+});
+
+test("live release verification rejects browser-stale mutable release files", async () => {
+  const context = fixture({ cacheControl: "public, max-age=3600" });
+  await assert.rejects(
+    verifyLiveRelease({
+      ...context,
+      siteUrl: "https://app.proairesis.digital",
+      check,
+      expectedReleaseId: releaseId,
+    }),
+    /can remain stale in a browser/,
   );
 });
 

@@ -4,6 +4,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { hashDirectory, protectedReleaseVersion } from './release-safety.mjs';
+import {
+  firstHashedAssetPath,
+  isImmutableAssetCacheControl,
+  isMutableSiteCacheControl,
+  publishSiteWithCachePolicy,
+  verifyPublishedSiteFiles,
+} from './site-cache-policy.mjs';
 
 const ACCOUNT = '037169690315';
 const REGION = 'ap-southeast-2';
@@ -52,15 +59,14 @@ requireValue(archivedSite.VersionId === protectedRelease.siteVersion && archived
 const alias = json(['lambda', 'get-alias', '--function-name', functionName, '--name', 'live']);
 
 async function publishVerifiedSite(site, manifest, temporary) {
-  run(['s3', 'cp', site, `s3://${siteBucket}/`, '--recursive', '--only-show-errors'], { timeout: 600_000 });
-  run(['s3', 'sync', site, `s3://${siteBucket}/`, '--delete', '--only-show-errors'], { timeout: 600_000 });
+  publishSiteWithCachePolicy(run, site, siteBucket);
   const downloaded = join(temporary, 'published-site');
   await mkdir(downloaded);
   run(['s3', 'sync', `s3://${siteBucket}/`, downloaded, '--only-show-errors'], { timeout: 600_000 });
   requireValue((await readFile(join(downloaded, 'release.json'))).equals(await readFile(join(site, 'release.json'))) &&
-    createHash('sha256').update(await readFile(join(downloaded, 'index.html'))).digest('hex') === manifest.indexSha256 &&
-    await hashDirectory(downloaded, { exclude: ['release.json'] }) === manifest.siteContentSha256,
+    createHash('sha256').update(await readFile(join(downloaded, 'index.html'))).digest('hex') === manifest.indexSha256,
   'The complete restored site does not match the pinned rollback release.');
+  await verifyPublishedSiteFiles(site, downloaded);
 }
 
 const plan = {
@@ -99,13 +105,25 @@ try {
   const invalidation = json(['cloudfront', 'create-invalidation', '--distribution-id', distributionId, '--paths', '/*']);
   const invalidationId = requireValue(invalidation.Invalidation?.Id, 'CloudFront did not return an invalidation ID.');
   run(['cloudfront', 'wait', 'invalidation-completed', '--distribution-id', distributionId, '--id', invalidationId], { timeout: 900_000 });
-  const publicRelease = await fetch(`${siteUrl}/release.json`, {cache:'no-store',redirect:'error',signal:AbortSignal.timeout(30000)});
-  const publicIndex = await fetch(`${siteUrl}/index.html`, {cache:'no-store',redirect:'error',signal:AbortSignal.timeout(30000)});
+  const freshRequest = () => ({cache:'no-store',redirect:'error',signal:AbortSignal.timeout(30000),headers:{'Cache-Control':'no-cache'}});
+  const publicRelease = await fetch(`${siteUrl}/release.json`, freshRequest());
+  const publicConfig = await fetch(`${siteUrl}/config.json`, freshRequest());
+  const publicIndex = await fetch(`${siteUrl}/index.html`, freshRequest());
   const health = await fetch(`${siteUrl}/api/health`, {cache:'no-store',redirect:'error',signal:AbortSignal.timeout(30000)});
-  requireValue(publicRelease.ok && Buffer.from(await publicRelease.arrayBuffer()).equals(await readFile(join(site, 'release.json'))) &&
-    publicIndex.ok && createHash('sha256').update(Buffer.from(await publicIndex.arrayBuffer())).digest('hex') === restoredManifest.indexSha256 &&
+  const publicIndexBytes = Buffer.from(await publicIndex.arrayBuffer());
+  const assetPath = requireValue(firstHashedAssetPath(publicIndexBytes.toString('utf8')),
+    'The restored frontend entry point has no hashed asset reference.');
+  const publicAsset = await fetch(`${siteUrl}${assetPath}`, freshRequest());
+  requireValue(publicRelease.ok && isMutableSiteCacheControl(publicRelease.headers.get('cache-control')) &&
+    Buffer.from(await publicRelease.arrayBuffer()).equals(await readFile(join(site, 'release.json'))) &&
+    publicConfig.ok && isMutableSiteCacheControl(publicConfig.headers.get('cache-control')) &&
+    publicIndex.ok && isMutableSiteCacheControl(publicIndex.headers.get('cache-control')) &&
+    createHash('sha256').update(publicIndexBytes).digest('hex') === restoredManifest.indexSha256 &&
+    publicAsset.ok && isImmutableAssetCacheControl(publicAsset.headers.get('cache-control')) &&
     health.ok && (await health.json()).ok === true,
   'The public rollback release or health check does not match the pinned release.');
+  if (publicConfig.body) await publicConfig.body.cancel();
+  if (publicAsset.body) await publicAsset.body.cancel();
   const evidence = {...plan, invalidationId, completedAt: new Date().toISOString()};
   await writeFile(resolve('build/rollback-evidence.json'), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence, null, 2));
