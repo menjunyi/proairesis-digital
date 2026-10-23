@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {assess, assessWithReasons, normalizeJob} from '../server/matching.mjs';
+import {assess, assessWithReasons, hasSkill, normalizeJob} from '../server/matching.mjs';
 import {normalizeImportedJob} from '../server/imported-jobs.mjs';
 import {MemoryStore, change} from '../server/store.mjs';
 import {createService} from '../server/service.mjs';
@@ -118,6 +118,358 @@ test('assessment does not mutate volunteered profile or job facts', () => {
   const before = JSON.stringify({person, vacancy});
   assessWithReasons(person, vacancy);
   assert.equal(JSON.stringify({person, vacancy}), before);
+});
+
+test('matching evidence removes source presentation markup without changing job facts or technology syntax', () => {
+  const raw = [
+    '# **Software Engineer**',
+    '* Build TypeScript systems with C*',
+    '* Build React <Suspense> interfaces with Array<T>; keep 2 * 3 * 4, 2 ** 3 ** 4, 2*3*4, foo*bar*baz, and src/*/index*/file as literal examples.',
+    '- Deploy [AWS](https://aws.amazon.com/) services for Australian customers.',
+    '<p>Use <strong>Git</strong> and _JavaScript_ in an established engineering workflow.</p>',
+    '**Maintain Node.js systems with accessible documentation and reliable automated tests.**',
+    '> **Build Azure &amp; Git services.**',
+    '<img src=x onerror=alert(1)>',
+    '<sCrIpT>alert("x"); const AWS=true;</sCrIpT>',
+    '&lt;script&gt;const GCP=true;&lt;/script&gt;',
+  ].join('\n');
+  const vacancy = normalizeJob({
+    id: 'formatted-evidence', title: 'Software Engineer', company: 'Example', country: 'AU',
+    roleFamily: 'software', location: 'Perth', url: 'https://example.org/jobs/formatted-evidence',
+    workplaceType: 'hybrid', employmentType: 'full-time', seniority: 'mid', description: raw,
+  }, 'test', '2026-10-23T00:00:00Z');
+  const person = {...profile, resumeText: 'TypeScript React AWS Azure Git JavaScript Node.js'};
+  const result = assessWithReasons(person, vacancy);
+  const excerpts = result.matches.map(item => item.jobEvidence);
+  assert.equal(result.highFit, true);
+  assert.equal(result.job.description, raw);
+  assert.ok(excerpts.includes('Build TypeScript systems with C*'));
+  assert.ok(excerpts.includes('Build React <Suspense> interfaces with Array<T>; keep 2 * 3 * 4, 2 ** 3 ** 4, 2*3*4, foo*bar*baz, and src/*/index*/file as literal examples.'));
+  assert.ok(excerpts.includes('Deploy AWS services for Australian customers.'));
+  assert.ok(excerpts.includes('Use Git and JavaScript in an established engineering workflow.'));
+  assert.ok(excerpts.includes('Maintain Node.js systems with accessible documentation and reliable automated tests.'));
+  assert.ok(excerpts.includes('Build Azure & Git services.'));
+  assert.ok(excerpts.every(value => !/^(?:#{1,6}|[-+*•]|\d{1,3}[.)])\s/.test(value)));
+  assert.ok(excerpts.every(value => !/<\/?(?:p|strong|a|img|script)(?:\s[^>]*)?>/i.test(value)));
+  assert.ok(excerpts.every(value => !/onerror|alert\(|const AWS=true|const GCP=true/.test(value)));
+});
+
+test('matching preserves ambiguous technical markers instead of treating them as prose formatting', () => {
+  const raw = [
+    'Use Python *args parameters.',
+    'Use AWS with C* tooling.',
+    'Use React _private methods with snake_.',
+    'Use Node.js __name__ through __dunder__ APIs.',
+    'Use JavaScript methods ending with snake_.',
+    'Use Ruby exponentiation 2**3**4 in tests.',
+    'Use _emphasis_ in prose and *TypeScript and Git* in production systems.',
+  ].join('\n');
+  const vacancy = normalizeJob({
+    id: 'technical-markers', title: 'Software Engineer', company: 'Example', country: 'AU',
+    roleFamily: 'software', location: 'Perth', url: 'https://example.org/jobs/technical-markers',
+    workplaceType: 'hybrid', employmentType: 'full-time', seniority: 'mid', description: raw,
+  }, 'test', '2026-10-23T00:00:00Z');
+  const result = assessWithReasons({...profile, resumeText: 'Python JavaScript TypeScript AWS React Git Node.js Ruby'}, vacancy);
+  const excerpts = result.matches.map(item => item.jobEvidence);
+  assert.ok(excerpts.includes('Use Python *args parameters.'));
+  assert.ok(excerpts.includes('Use AWS with C* tooling.'));
+  assert.ok(excerpts.includes('Use React _private methods with snake_.'));
+  assert.ok(excerpts.includes('Use Node.js __name__ through __dunder__ APIs.'));
+  assert.ok(excerpts.includes('Use JavaScript methods ending with snake_.'));
+  assert.ok(excerpts.includes('Use Ruby exponentiation 2**3**4 in tests.'));
+  assert.ok(excerpts.includes('Use emphasis in prose and TypeScript and Git in production systems.'));
+});
+
+test('matching strips copied HTML at any depth while preserving component and generic syntax', () => {
+  const raw = [
+    '<P><STRONG>Use React</STRONG><script>ignored()</script>AWS.</P>',
+    '<p>Build Docker.</p><p>Build Kubernetes systems.</p>',
+    '<p title="a > b">Use SQL in production.</p>',
+    '<p>Use Terraform for infrastructure.',
+    `${'<div>'.repeat(10)}Use Git for delivery.${'</div>'.repeat(10)}`,
+    '<table><tbody><tr><td><i>Use Azure</i> &ndash; <code>GCP</code>&hellip;</td></tr></tbody></table>',
+    'Use Next.js <Script>, <Svg>, and <Suspense> components with JavaScript in production.',
+    'Use TypeScript with <Header>, Array<T>, Array<string>, Promise<void>, Record<string, object>, List<int>, f<T extends React.Component>, Map<string, Array<number>>, Dictionary<string, List<int>>, Promise<Result<User>>, and Foo<T = string> components.',
+  ].join('\n');
+  const vacancy = normalizeJob({
+    id: 'copied-html', title: 'Software Engineer', company: 'Example', country: 'AU',
+    roleFamily: 'software', location: 'Perth', url: 'https://example.org/jobs/copied-html',
+    workplaceType: 'hybrid', employmentType: 'full-time', seniority: 'mid', description: raw,
+  }, 'test', '2026-10-23T00:00:00Z');
+  const person = {...profile, resumeText: 'React AWS Docker Kubernetes SQL Terraform Git Azure GCP JavaScript TypeScript'};
+  const result = assessWithReasons(person, vacancy);
+  const excerpts = result.matches.map(item => item.jobEvidence);
+  assert.equal(result.highFit, true);
+  assert.ok(excerpts.includes('Use React AWS.'));
+  assert.ok(excerpts.includes('Build Docker.'));
+  assert.ok(excerpts.includes('Build Kubernetes systems.'));
+  assert.ok(excerpts.includes('Use SQL in production.'));
+  assert.ok(excerpts.includes('Use Terraform for infrastructure.'));
+  assert.ok(excerpts.includes('Use Git for delivery.'));
+  assert.ok(excerpts.includes('Use Azure – GCP…'));
+  assert.ok(excerpts.includes('Use Next.js <Script>, <Svg>, and <Suspense> components with JavaScript in production.'));
+  assert.ok(excerpts.includes('Use TypeScript with <Header>, Array<T>, Array<string>, Promise<void>, Record<string, object>, List<int>, f<T extends React.Component>, Map<string, Array<number>>, Dictionary<string, List<int>>, Promise<Result<User>>, and Foo<T = string> components.'));
+  assert.ok(excerpts.every(value=>!/<\/?(?:p|strong|div)(?:\s[^>]*)?>/i.test(value)));
+});
+
+test('matching cleans formatted requirement evidence before showing a hard-gate reason', () => {
+  const vacancy = {
+    ...job,
+    requirements: {...job.requirements, citizenship: 'required'},
+    requirementEvidence: {citizenship: '**You must be an Australian citizen.**'},
+  };
+  const result = assessWithReasons({...profile, workRights: 'visa'}, vacancy);
+  assert.equal(result.highFit, false);
+  assert.equal(result.gaps[0].jobEvidence, 'You must be an Australian citizen.');
+  assert.equal(vacancy.requirementEvidence.citizenship, '**You must be an Australian citizen.**');
+});
+
+test('conditional clearance and experience evidence cannot become candidate hard gates', () => {
+  const clearance = assessWithReasons({...profile,clearance:'baseline'}, {
+    ...job,requirements:{...job.requirements,clearance:'nv2'},
+    requirementEvidence:{clearance:'You must hold NV2 security clearance if assigned to the government project.'},
+  });
+  assert.equal(clearance.highFit, true);
+  assert.ok(!clearance.gaps.some(item=>/clearance recorded/i.test(item.text)));
+  const experience = assessWithReasons({...profile,yearsExperience:2}, {
+    ...job,requirements:{...job.requirements,minimumYears:5},
+    requirementEvidence:{minimumYears:'At least 5 years of professional experience is required if assigned to the lead project.'},
+  });
+  assert.equal(experience.highFit, true);
+  assert.ok(!experience.gaps.some(item=>/experience requirement exceeds/i.test(item.text)));
+});
+
+test('matching formats Markdown tables and ignores fence labels as evidence', () => {
+  const tableJob = {
+    ...job,
+    description: 'Skills\n| Skill | Usage |\n| --- | --- |\n| AWS | Cloud |\n| Node.js | Services |\nTypeScript supports reliable testing, documentation, deployment, and maintainable production delivery.',
+    skills: ['AWS','Node.js','TypeScript'],
+  };
+  const tableResult = assessWithReasons({...profile,resumeText:'AWS Node.js TypeScript'}, tableJob);
+  assert.equal(tableResult.highFit, true);
+  assert.equal(tableResult.matches.find(item=>item.text.startsWith('AWS ')).jobEvidence, 'AWS — Cloud');
+  assert.equal(tableResult.matches.find(item=>item.text.startsWith('Node.js ')).jobEvidence, 'Node.js — Services');
+
+  const fenced = assessWithReasons(profile, {
+    ...job,
+    description: '```React\nexample only\n```\nTypeScript and AWS support reliable testing, documentation, deployment, and maintainable production delivery for Australian customers.',
+    skills: ['React','TypeScript','AWS'],
+  });
+  assert.equal(fenced.highFit, true);
+  assert.ok(!fenced.matches.some(item=>item.text.startsWith('React ')));
+  assert.ok(fenced.matches.every(item=>!item.jobEvidence.includes('```')));
+});
+
+test('hidden source content cannot supply hard gates or pad a sparse description', () => {
+  const hidden = '<sCrIpT>Australian citizenship is required. No visa sponsorship is available. Must have NV2 security clearance.</sCrIpT>';
+  const stale = {
+    ...job,
+    description: `${hidden}\n${description}`,
+    requirements: {...job.requirements, citizenship: 'required'},
+    requirementEvidence: {citizenship: hidden},
+  };
+  const result = assessWithReasons({...profile, workRights: 'visa'}, stale);
+  assert.equal(result.highFit, true);
+  assert.ok(!result.gaps.some(item=>/citizen/i.test(item.text)));
+  assert.equal(result.job.description, stale.description);
+
+  for(const sparse of [
+    {...job,description:`<script>${'x'.repeat(200)}</script> React AWS`,skills:['React','AWS']},
+    {...job,description:`${'<div></div>'.repeat(70)} React AWS`,skills:['React','AWS']},
+    {...job,description:`<SCRIPT>React TypeScript AWS ${'x'.repeat(200)}`,skills:['React','TypeScript','AWS']},
+    {...job,description:`React AWS [apply](https://example.test/(x)/${'x'.repeat(220)})`,skills:['React','AWS']},
+  ]){
+    const rejected = assessWithReasons(profile, sparse);
+    assert.equal(rejected.highFit, false);
+    assert.match(rejected.reason, /too short/);
+    assert.equal(rejected.job.description, sparse.description);
+  }
+
+  const linkSkills = {
+    ...job,
+    description: `${'The role involves planning, communication, documentation, stakeholder coordination, and reliable delivery practices. '.repeat(2)}[apply](https://example.test/(x)/React/AWS)`,
+    skills: ['React','AWS'],
+  };
+  const linkRejected = assessWithReasons(profile, linkSkills);
+  assert.equal(linkRejected.highFit, false);
+  assert.match(linkRejected.reason, /too little recognized skill evidence/);
+  assert.equal(linkRejected.job.description, linkSkills.description);
+
+  const visibleSkill = {
+    ...job,
+    description: '[Apply now](https://example.test/React). Later, engineers use React to build accessible interfaces. TypeScript and AWS support reliable delivery, testing, documentation, and maintainable production systems.',
+    skills: ['React','TypeScript','AWS'],
+  };
+  const accepted = assessWithReasons(profile, visibleSkill);
+  assert.equal(accepted.highFit, true);
+  assert.equal(accepted.matches.find(item=>item.text.startsWith('React ')).jobEvidence, 'Later, engineers use React to build accessible interfaces.');
+
+  for (const raw of [
+    '[Apply](https://example.test/React/AWS) Later, engineers use React and AWS with TypeScript to build accessible, reliable, documented production interfaces.',
+    'Learn[more](https://example.test/React/AWS) Later, engineers use React and AWS with TypeScript to build accessible, reliable, documented production interfaces.',
+    'See[apply](/React/AWS) Later, engineers use React and AWS with TypeScript to build accessible, reliable, documented production interfaces.',
+  ]) {
+    const linked = assessWithReasons(profile, {...job,description:raw,skills:['React','AWS','TypeScript']});
+    assert.equal(linked.highFit, true);
+    assert.ok(linked.matches.every(item=>!item.jobEvidence.includes('example.test')&&!item.jobEvidence.includes('/React/AWS')));
+  }
+
+  const concealedSkills = {
+    ...job,
+    description: `${'The role involves planning, communication, documentation, stakeholder coordination, and reliable delivery practices. '.repeat(2)}\n<Hidden data-a="React" data-b="AWS"></Hidden>\n<template>React AWS</template>\n<div hidden>React AWS</div>\n[candidate]: https://example.test/React/AWS`,
+    skills: ['React','AWS'],
+  };
+  const concealedRejected = assessWithReasons(profile, concealedSkills);
+  assert.equal(concealedRejected.highFit, false);
+  assert.match(concealedRejected.reason, /too little recognized skill evidence/);
+
+  const componentOnlySkills = {
+    ...job,
+    description: `${'The role involves planning, communication, documentation, stakeholder coordination, and reliable delivery practices. '.repeat(2)}<React> <AWS>`,
+    skills: ['React','AWS'],
+  };
+  const componentOnlyRejected = assessWithReasons(profile, componentOnlySkills);
+  assert.equal(componentOnlyRejected.highFit, false);
+  assert.match(componentOnlyRejected.reason, /too little recognized skill evidence/);
+
+  let bareUrlSkills;
+  for (const destination of [
+    'https://example.test/guides/React/AWS',
+    'www.example.test/guides/React/AWS',
+    'example.test/guides/React/AWS',
+    'ftp://example.test/React/AWS',
+    'mailto:React@AWS.test',
+  ]) {
+    bareUrlSkills = {
+      ...job,
+      description: `${'The role involves planning, communication, documentation, stakeholder coordination, and reliable delivery practices. '.repeat(2)}Read ${destination} for company information.`,
+      skills: ['React','AWS'],
+    };
+    const bareUrlRejected = assessWithReasons(profile, bareUrlSkills);
+    assert.equal(bareUrlRejected.highFit, false, destination);
+    assert.match(bareUrlRejected.reason, /too little recognized skill evidence/, destination);
+  }
+
+  const normalizedBareUrl = normalizeJob({
+    id: 'url-only-skills', title: 'Coordinator', company: 'Example', country: 'AU', roleFamily: 'software',
+    location: 'Sydney', url: 'https://example.test/jobs/url-only-skills', description: bareUrlSkills.description,
+  }, 'test');
+  assert.deepEqual(normalizedBareUrl.skills, []);
+
+  const ambiguousWords = normalizeJob({
+    id: 'ambiguous-words', title: 'Coordinator', company: 'Example', country: 'AU', roleFamily: 'software',
+    location: 'Sydney', url: 'https://example.test/jobs/ambiguous-words',
+    description: 'You will go above and beyond for customers and excel at communication, planning, documentation, stakeholder coordination, and reliable delivery practices.'.repeat(2),
+  }, 'test');
+  assert.deepEqual(ambiguousWords.skills, []);
+  const ambiguousRejected = assessWithReasons({...profile,resumeText:'Go Excel'}, {...ambiguousWords,skills:['Go','Excel']});
+  assert.equal(ambiguousRejected.highFit, false);
+
+  for (const prose of [
+    'Design angular shapes for reports and work in an agile way with clear communication and reliable delivery practices.',
+    'Enjoy java coffee while using scrum to coordinate ordinary office tasks, documentation, and communication.',
+    'Use a ruby colour palette and an agile response for customer communication and general planning.',
+    'Work with the rest of the team in an agile way through planning, communication, and documentation.',
+  ]) {
+    const ordinary = normalizeJob({id: prose, title: 'Coordinator', company: 'Example', country: 'AU', roleFamily: 'software', location: 'Sydney', url: `https://example.test/jobs/${Buffer.from(prose).toString('hex').slice(0,40)}`, description: prose.repeat(2)}, 'test');
+    assert.ok(ordinary.skills.length < 2, `${prose}: ${ordinary.skills.join(',')}`);
+  }
+
+  for (const spelling of ['REACT','SWIFT','RUST','EXCEL','GO','REST','JAVA','RUBY','ANGULAR','AGILE','SCRUM']) {
+    assert.equal(hasSkill(`Production experience with ${spelling} services.`, spelling === 'GO' ? 'Go' : spelling[0] + spelling.slice(1).toLowerCase()), true, spelling);
+  }
+
+  const encodedCode = {
+    ...job,
+    description: '<code>&lt;script&gt;</code> Build React interfaces for accessible products. TypeScript and AWS support reliable delivery, testing, documentation, and maintainable production systems.',
+    skills: ['React','TypeScript','AWS'],
+  };
+  assert.equal(assessWithReasons(profile, encodedCode).highFit, true);
+
+  const technicalCode = {
+    ...job,
+    description: 'Security work includes safely escaping `<script>` strings in JavaScript. Build React interfaces and deploy AWS services with TypeScript using Array<string>, Promise<void>, Record<string, object>, List<int>, f<T extends Foo>, and arr[0](value) in maintainable production systems.',
+    skills: ['JavaScript','React','AWS','TypeScript'],
+  };
+  const technicalResult = assessWithReasons({...profile,resumeText:`${profile.resumeText} JavaScript`}, technicalCode);
+  assert.equal(technicalResult.highFit, true);
+  assert.ok(technicalResult.matches.some(item=>item.jobEvidence.includes('<script>')));
+  assert.ok(technicalResult.matches.some(item=>item.jobEvidence.includes('Array<string>')));
+
+  const formattedMarkers = {
+    ...job,
+    description: '> > * [x] ***React*** enables accessible interfaces. ___TypeScript___ and AWS support reliable delivery, testing, documentation, and maintainable production systems.',
+    skills: ['React','TypeScript','AWS'],
+  };
+  const markerResult = assessWithReasons(profile, formattedMarkers);
+  assert.equal(markerResult.highFit, true);
+  assert.ok(markerResult.matches.some(item=>item.jobEvidence === 'React enables accessible interfaces.'));
+  assert.ok(markerResult.matches.some(item=>item.jobEvidence.startsWith('TypeScript and AWS')));
+
+  const afterVoid = {
+    ...job,
+    description: '<img hidden src=x><input hidden><embed src=x> Build React interfaces for accessible products. TypeScript and AWS support reliable delivery, testing, documentation, and maintainable production systems.',
+    skills: ['React','TypeScript','AWS'],
+  };
+  assert.equal(assessWithReasons(profile, afterVoid).highFit, true);
+
+  const resumeWithCode = {
+    ...profile,
+    resumeText: 'Reviewed a literal <script> example. Built TypeScript and React interfaces. Deployed AWS services.',
+  };
+  const resumeResult = assessWithReasons(resumeWithCode, job);
+  assert.equal(resumeResult.highFit, true);
+  assert.equal(resumeResult.matches.length, 3);
+
+  const recognized = ['JavaScript','TypeScript','Python','Java','C#','C++','React','Angular','Vue','Node.js','SQL','PostgreSQL','MySQL','AWS','Azure','GCP','Docker','Kubernetes','Terraform','Linux','Git','CI/CD','REST','GraphQL','HTML','CSS','Figma','Power BI','Tableau','Excel','Agile','Scrum','Selenium','Playwright','Cypress','Jest','Go','Rust','Ruby','PHP'];
+  const longMalformed = {...job,description:`${'['.repeat(29000)} ${recognized.join(' ')}`,skills:recognized};
+  const started=performance.now();
+  assessWithReasons({...profile,resumeText:recognized.join(' ')},longMalformed);
+  assert.ok(performance.now()-started<500,'malformed Markdown must remain linear-time');
+
+  const malformedTags = {...job,description:`${'<div title="'.repeat(1580)} ${recognized.join(' ')} ${'reliable engineering delivery documentation '.repeat(5)}`,skills:recognized};
+  const tagStarted=performance.now();
+  assessWithReasons({...profile,resumeText:recognized.join(' ')},malformedTags);
+  assert.ok(performance.now()-tagStarted<500,'malformed quoted tags must remain bounded and sanitize only once per assessment');
+
+  const referenceMalformed = {...job,description:`[id]: https://example.test\n${'['.repeat(28000)} ${recognized.join(' ')}`,skills:recognized};
+  const referenceStarted=performance.now();
+  assessWithReasons({...profile,resumeText:recognized.join(' ')},referenceMalformed);
+  assert.ok(performance.now()-referenceStarted<500,'reference use parsing must remain bounded when a definition exists');
+});
+
+test('browser-decoded hidden styles cannot supply skills or eligibility gates', () => {
+  const styles = [
+    'display&colon;none',
+    'display&Tab;:none',
+    'display&NewLine;:none',
+    'display&bsol;3a none',
+    'display&sol;&ast;&ast;&sol;:none',
+    'display&#58:none',
+    'display&#x3a:none',
+    'd&#105splay:none',
+  ];
+  for (const style of styles) {
+    const hidden = `<div style="${style}">You must be an Australian citizen. No visa sponsorship is available. You must hold NV2 security clearance. At least 12 years of professional experience is required. Python is required.</div>`;
+    const vacancy = {
+      ...job,
+      description: `${hidden}\n${description}`,
+      skills: [...job.skills, 'Python'],
+      requirements: {citizenship: 'required', sponsorship: 'unavailable', clearance: 'nv2', minimumYears: 12},
+      requirementEvidence: {citizenship: hidden, sponsorship: hidden, clearance: hidden, minimumYears: hidden},
+    };
+    const result = assessWithReasons({
+      ...profile,
+      workRights: 'visa',
+      needsSponsorship: 'yes',
+      clearance: 'baseline',
+      yearsExperience: 5,
+    }, vacancy);
+    assert.equal(result.highFit, true, style);
+    assert.equal(result.reason, null, style);
+    assert.ok(!result.matches.some(item => item.text.startsWith('Python ')), style);
+    assert.ok(!result.gaps.some(item => /citizen|sponsor|clearance|12 years/i.test(`${item.text} ${item.jobEvidence}`)), style);
+  }
 });
 
 test('import and saved shortlist assessments retain the same single unverified-source warning', async () => {

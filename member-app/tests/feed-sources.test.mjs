@@ -96,6 +96,30 @@ test('HTML is converted to plain text and executable/style content is discarded'
   assert.doesNotMatch(jobs[0].description, /<|>|alert|secret|display/);
   assert.match(jobs[0].description, /AWS & React/);
   assert.equal(plainText('<script>unclosed malicious text'), '');
+  assert.equal(plainText('Use React <Suspense>, Array<T>, C*, and 2 * 3 workers.'),
+    'Use React <Suspense>, Array<T>, C*, and 2 * 3 workers.');
+});
+
+test('hidden provider HTML cannot create eligibility requirements', async () => {
+  const hidden = 'Australian citizenship is required. No visa sponsorship is available. You must hold NV2 security clearance.';
+  const concealed = [
+    `<div hidden>${hidden}</div>`,
+    `<section aria-hidden="true">${hidden}</section>`,
+    `<div style="display: none">${hidden}</div>`,
+    `<div style="visibility: hidden">${hidden}</div>`,
+    ...[
+      'display&colon;none', 'display&Tab;:none', 'display&NewLine;:none', 'display&bsol;3a none',
+      'display&sol;&ast;&ast;&sol;:none', 'display&#58:none', 'display&#x3a:none', 'd&#105splay:none',
+    ].map(style => `<div style="${style}">${hidden}</div>`),
+  ];
+  const {jobs} = await fetchRows(approved(), {jobs: concealed.map((content, index) =>
+    greenhouse({id: index + 1, content: `${description}${content}`}))});
+  assert.equal(jobs.length, concealed.length);
+  for (const job of jobs) {
+    assert.deepEqual(job.requirements, {citizenship: 'unknown', sponsorship: 'unknown', clearance: 'unknown', minimumYears: null});
+    assert.deepEqual(job.requirementEvidence, {});
+    assert.doesNotMatch(job.description, /citizenship|sponsorship|NV2/i);
+  }
 });
 
 test('Lever fetches every page, includes lists and rejects incomplete pagination', async () => {

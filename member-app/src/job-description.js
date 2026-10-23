@@ -1,3 +1,5 @@
+import { sanitizeJobDescriptionContent, stripJobDescriptionEmphasis } from "./job-description-source.js";
+
 const SECTION_DEFINITIONS = {
   responsibilities: { title: "What you'll do", order: 2 },
   requirements: { title: "What they're looking for", order: 3 },
@@ -7,68 +9,40 @@ const SECTION_DEFINITIONS = {
   other: { title: "Other details", order: 6 },
 };
 
-const BLOCK_TAGS = /<\/?(?:address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|header|hr|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^>]*>/gi;
-const HTML_TAGS = /<\/?(?:a|abbr|audio|b|base|bdi|bdo|body|button|canvas|caption|cite|code|col|colgroup|data|datalist|del|details|dialog|em|head|html|i|img|input|ins|kbd|label|legend|link|map|mark|menu|meta|meter|optgroup|option|output|picture|progress|q|rp|rt|ruby|s|samp|select|slot|small|source|span|strong|sub|summary|sup|template|textarea|time|title|track|u|var|video|wbr)\b[^>]*>/gi;
-const UNSAFE_BLOCKS = /<(script|style|iframe|object|embed|svg|noscript)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
-
-function decodeEntities(value) {
-  const named = {
-    amp: "&",
-    apos: "'",
-    gt: ">",
-    hellip: "…",
-    ldquo: "“",
-    lsquo: "‘",
-    nbsp: " ",
-    ndash: "–",
-    quot: '"',
-    rdquo: "”",
-    rsquo: "’",
-    lt: "<",
-  };
-  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
-    if (entity[0] !== "#") return named[entity.toLowerCase()] ?? match;
-    const point = entity[1].toLowerCase() === "x"
-      ? Number.parseInt(entity.slice(2), 16)
-      : Number.parseInt(entity.slice(1), 10);
-    if (!Number.isInteger(point) || point < 32 || point > 0x10ffff) return "";
-    try {
-      return String.fromCodePoint(point);
-    } catch {
-      return "";
-    }
-  });
-}
-
 function sourceLines(source) {
-  return decodeEntities(String(source || "").replace(/\r\n?/g, "\n"))
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(UNSAFE_BLOCKS, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<li\b[^>]*>/gi, "\n- ")
-    .replace(/<\/li\s*>/gi, "\n")
-    .replace(/<h[1-6]\b[^>]*>/gi, "\n## ")
-    .replace(/<\/h[1-6]\s*>/gi, "\n")
-    .replace(BLOCK_TAGS, "\n")
-    .replace(HTML_TAGS, " ")
+  const lines = sanitizeJobDescriptionContent(String(source || "").replace(/\r\n?/g, "\n"), { structured: true })
     .replace(/\u00a0/g, " ")
-    .split(/\n+/)
-    .map((line) => line.replace(/[\t ]+/g, " ").trim())
+    .split("\n")
+    .map((line) => line.replace(/[\t ]+/g, " ").replace(/\s+([,.;:!?…])/g, "$1").trim());
+  const tableRows = new Set(), tableSeparators = new Set();
+  const separator = (line) => /^(?:\|\s*)?:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+(?:\s*\|)?$/.test(line);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!separator(lines[index])) continue;
+    tableSeparators.add(index);
+    if (index > 0 && lines[index - 1].includes("|")) tableRows.add(index - 1);
+    for (let row = index + 1; row < lines.length && lines[row] && lines[row].includes("|"); row += 1) tableRows.add(row);
+  }
+  return lines.map((text, index) => {
+    if (/^(?:`{3,}|~{3,})[\w-]*$/.test(text) || tableSeparators.has(index)) return "";
+    if (tableRows.has(index)) {
+      const cells = text.replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()).filter(Boolean);
+      return cells.length ? `- ${cells.join(" — ")}` : "";
+    }
+    return text;
+  })
     .filter(Boolean);
 }
 
 function cleanInline(value) {
-  return String(value || "")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "$1")
-    .replace(/(?<!_)_([^_\n]+)_(?!_)/g, "$1")
+  let text = stripJobDescriptionEmphasis(String(value || "")
+    .replace(/^(?:>\s*)+/, "")
+    .replace(/^(?:[-+*•·]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/, "")
+    .replace(/^\[[ xX]\]\s*/, ""))
     .replace(/`([^`]+)`/g, "$1")
     .replace(/^>\s*/, "")
     .replace(/[\t ]+/g, " ")
     .trim();
+  return text;
 }
 
 function comparisonKey(value) {
@@ -338,6 +312,17 @@ export function processJobDescription(job = {}) {
   if (!overview.length) {
     const firstRecord = [...records.values(), ...otherRecords].find((record) => record.paragraphs.length || record.items.length);
     overview = firstRecord ? unique([...firstRecord.paragraphs, ...firstRecord.items], 1, 560) : [];
+  }
+  const accountedFor = new Set(overview.map(comparisonKey));
+  for (const record of [...records.values(), ...otherRecords]) {
+    for (const detail of [...record.paragraphs, ...record.items]) accountedFor.add(comparisonKey(detail));
+  }
+  for (const detail of unique(overviewSource, 10, 320)) {
+    const key = comparisonKey(detail);
+    if (!accountedFor.has(key)) {
+      recordFor("other", "Other details").items.push(detail);
+      accountedFor.add(key);
+    }
   }
 
   const sections = [...records.values(), ...otherRecords]

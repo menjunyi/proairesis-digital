@@ -49,6 +49,12 @@ test("converts safe HTML structure and removes executable or embedded blocks", (
   assert.match(output, /Build React interfaces & APIs/);
   assert.match(output, /Three years of experience required/);
   assert.doesNotMatch(output, /window\.evil|display:none|evil\.test|secret|<script|<iframe/);
+
+  const inline = JSON.stringify(processJobDescription({
+    description: '<p>Build <strong>React</strong> products with <a href="https://example.com/jobs/1">TypeScript</a>.</p>',
+  }));
+  assert.match(inline, /Build React products with TypeScript\./);
+  assert.doesNotMatch(inline, /TypeScript \./);
 });
 
 test("classifies useful sentences in an unstructured plain-text description", () => {
@@ -186,13 +192,127 @@ test("keeps factual Markdown and HTML headings as visible key points", () => {
 
 test("keeps code-like angle brackets while removing recognised HTML markup", () => {
   const result = processJobDescription({
-    description: "<p>Build React <Suspense> boundaries and Array<T> utilities.</p><p>Integrate A < B and C > D safely.</p><img src=x onerror=alert(1)>",
+    description: "<p>Build React <Suspense> boundaries with Array<T>, Array<string>, Promise<void>, Record<string, object>, List<int>, f<T extends React.Component>, Map<string, Array<number>>, Dictionary<string, List<int>>, Promise<Result<User>>, and Foo<T = string> utilities.</p><p>Integrate A < B and C > D safely.</p><img src=x onerror=alert(1)>",
   });
   const output = JSON.stringify(result);
   assert.match(output, /React <Suspense>/);
   assert.match(output, /Array<T>/);
+  assert.match(output, /Array<string>/);
+  assert.match(output, /Promise<void>/);
+  assert.match(output, /Record<string, object>/);
+  assert.match(output, /List<int>/);
+  assert.match(output, /f<T extends React\.Component>/);
+  assert.match(output, /Map<string, Array<number>>/);
+  assert.match(output, /Dictionary<string, List<int>>/);
+  assert.match(output, /Promise<Result<User>>/);
+  assert.match(output, /Foo<T = string>/);
   assert.match(output, /A < B and C > D/);
   assert.doesNotMatch(output, /<p>|<img|onerror/);
+});
+
+test("turns task lists, fenced examples and Markdown tables into readable key points", () => {
+  const result = processJobDescription({
+    description: [
+      "## Requirements",
+      "- [x] AWS",
+      "- [ ] React",
+      "- ~~SQL~~",
+      "- ==TypeScript==",
+      "```",
+      "* TypeScript delivery experience",
+      "```",
+      "| Skill | Requirement |",
+      "| --- | --- |",
+      "| SQL | Required |",
+    ].join("\n"),
+  });
+  const output = JSON.stringify(result);
+  assert.match(output, /AWS/);
+  assert.match(output, /React/);
+  assert.match(output, /SQL/);
+  assert.match(output, /TypeScript/);
+  assert.match(output, /TypeScript delivery experience/);
+  assert.match(output, /Skill — Requirement/);
+  assert.match(output, /SQL — Required/);
+  assert.doesNotMatch(output, /\[x\]|\[ \]|```|\| ---|\| Skill|~~|==/);
+
+  const compactTable = JSON.stringify(processJobDescription({description: "Tool | Usage\n--- | ---\nNode.js | Services"}));
+  assert.match(compactTable, /Tool — Usage/);
+  assert.match(compactTable, /Node\.js — Services/);
+  assert.doesNotMatch(compactTable, /\|/);
+});
+
+test("keeps common technical paths while removing adjacent link destinations", () => {
+  const result = processJobDescription({
+    description: "Use Node.js/Express, React.js/Next.js, Vue.js/Nuxt, ASP.NET/Core, System.Net/Http, and org.springframework/boot. Learn[more](https://example.test/React/AWS) and See[apply](/React/AWS). Keep arr[0](value).",
+  });
+  const output = JSON.stringify(result);
+  for (const value of ["Node.js/Express", "React.js/Next.js", "Vue.js/Nuxt", "ASP.NET/Core", "System.Net/Http", "org.springframework/boot", "arr[0](value)"]) assert.ok(output.includes(value), value);
+  assert.match(output, /Learn more/);
+  assert.match(output, /See apply/);
+  assert.doesNotMatch(output, /example\.test|\/React\/AWS|Learn\[more\]|See\[apply\]/);
+});
+
+test("preserves operators, identifiers, globs and qualified C++ templates", () => {
+  const description = "Use 2 * 3 * 4, 2 ** 3 ** 4, 2*3*4, foo*bar*baz, src/*/index*/file, _private, snake_, and std::vector<std::pair<string, int>> in C++ services.";
+  const output = JSON.stringify(processJobDescription({description}));
+  for (const value of ["2 * 3 * 4", "2 ** 3 ** 4", "2*3*4", "foo*bar*baz", "src/*/index*/file", "_private", "snake_", "std::vector<std::pair<string, int>>"]) assert.ok(output.includes(value), value);
+});
+
+test("distinguishes paired underscored identifiers from Markdown emphasis", () => {
+  const result = processJobDescription({
+    description: "Use Python *args and React _private methods with snake_. Use _emphasis_ only for prose.",
+  });
+  const output = JSON.stringify(result);
+  assert.match(output, /Use Python \*args and React _private methods with snake_\./);
+  assert.match(output, /Use emphasis only for prose\./);
+  assert.doesNotMatch(output, /_emphasis_/);
+});
+
+test("removes hidden source metadata while preserving visible technical examples", () => {
+  const hidden = "Australian citizenship is required. React and AWS are mandatory.";
+  const result = processJobDescription({
+    description: [
+      `<template>${hidden}</template>`,
+      `<div hidden>${hidden}</div>`,
+      `<div aria-hidden="tr&#x75;e">${hidden}</div>`,
+      `<div style="display:/**/none">${hidden}</div>`,
+      `<font title="${hidden}">Visible employer copy.</font>`,
+      `[candidate]: <https://example.test/apply>`,
+      `  "${hidden}"`,
+      "Security work includes safely escaping `<script>` strings in JavaScript.",
+      "> > * [x] ***Build React*** interfaces with ___TypeScript___ and AWS.",
+      "Use arr[0](value) when processing application data.",
+      "<img hidden src=x> Continue with visible delivery documentation.",
+    ].join("\n"),
+  });
+  const output = JSON.stringify(result);
+  assert.match(output, /Visible employer copy/);
+  assert.match(output, /escaping <script> strings/);
+  assert.match(output, /Build React interfaces with TypeScript and AWS/);
+  assert.match(output, /arr\[0\]\(value\)/);
+  assert.match(output, /Continue with visible delivery documentation/);
+  assert.doesNotMatch(output, /Australian citizenship|aria-hidden|display:|candidate|example\.test|\[x\]|\*\*\*/);
+});
+
+test("removes hidden styles encoded with browser character references", () => {
+  const styles = [
+    "display&colon;none",
+    "display&Tab;:none",
+    "display&NewLine;:none",
+    "display&bsol;3a none",
+    "display&sol;&ast;&ast;&sol;:none",
+    "display&#58:none",
+    "display&#x3a:none",
+    "d&#105splay:none",
+  ];
+  const hidden = styles.map((style, index) => `<p style="${style}">Encoded hidden ${index}: Australian citizenship and Python.</p>`);
+  const result = processJobDescription({
+    description: [...hidden, "<p>Visible TypeScript delivery work remains available.</p>"].join("\n"),
+  });
+  const output = JSON.stringify(result);
+  assert.match(output, /Visible TypeScript delivery work remains available/);
+  assert.doesNotMatch(output, /Encoded hidden|Australian citizenship|Python|display&/);
 });
 
 test("removes Markdown image decoration before processing its alt text", () => {

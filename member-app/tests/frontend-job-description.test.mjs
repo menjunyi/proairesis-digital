@@ -89,6 +89,25 @@ test("processed description never creates executable source markup", () => {
   assert.match(html, /Build safe interfaces/);
 });
 
+test("processed description omits browser-decoded hidden styles", () => {
+  const styles = [
+    "display&colon;none",
+    "display&Tab;:none",
+    "display&NewLine;:none",
+    "display&bsol;3a none",
+    "display&sol;&ast;&ast;&sol;:none",
+    "display&#58:none",
+    "display&#x3a:none",
+    "d&#105splay:none",
+  ];
+  const hidden = styles.map((style, index) => `<p style="${style}">Encoded hidden ${index}: Australian citizenship and Python.</p>`);
+  const html = renderToStaticMarkup(React.createElement(ProcessedJobDescription, {
+    job: { description: [...hidden, "<p>Visible TypeScript delivery work remains available.</p>"].join("\n") },
+  }));
+  assert.match(html, /Visible TypeScript delivery work remains available/);
+  assert.doesNotMatch(html, /Encoded hidden|Australian citizenship|Python|display&/);
+});
+
 test("signed-in opportunity and application use the same structured presentation", () => {
   const match = { job, score: 86, matches: [], gaps: [], needsConfirmation: [] };
   const opportunity = renderToStaticMarkup(React.createElement(OpportunityDialog, {

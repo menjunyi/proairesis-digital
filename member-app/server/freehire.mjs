@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {isIP} from 'node:net';
 import {explicitRequirements} from './imported-jobs.mjs';
-import {detectSkills, normalizeJob} from './matching.mjs';
+import {detectSkills, normalizeJob, sanitizeJobDescriptionContent} from './matching.mjs';
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_RESULTS = 100;
@@ -89,7 +89,7 @@ function normalizeFreehire(row, licenseReference, fetchedAt) {
     workplaceType: ({remote: 'remote', hybrid: 'hybrid', onsite: 'on-site'})[workMode] ?? 'unknown',
     employmentType: ({full_time: 'full-time', part_time: 'part-time', contract: 'contract', internship: 'internship', fellowship: 'fellowship'})[employment] ?? 'unknown',
     seniority: ({middle: 'mid', c_level: 'executive', intern: 'junior'})[seniority] ?? seniority,
-    skills: detectSkills(description), requirements: extracted.requirements,
+    skills: detectSkills(sanitizeJobDescriptionContent(description)), requirements: extracted.requirements,
   }, `freehire:${upstream}`, fetchedAt);
   if (!job) return null;
   const publishedAt = sourceTimestamp(row.posted_at);

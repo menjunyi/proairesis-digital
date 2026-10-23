@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {isIP} from 'node:net';
-import {normalizeJob, ROLE_FAMILIES} from './matching.mjs';
+import {normalizeJob, ROLE_FAMILIES, sanitizeJobDescriptionContent} from './matching.mjs';
 
 const FIELDS = new Set(['title', 'company', 'url', 'location', 'description', 'roleFamily',
   'workplace', 'employmentType', 'seniority', 'australiaConfirmed', 'permissionConfirmed']);
@@ -89,24 +89,26 @@ export function explicitRequirements(description) {
     new RegExp(String.raw`\b(?:must|need to)\s+have\s+${experience}`, 'gi'),
     new RegExp(String.raw`\b${experience}\s+(?:(?:is|are)\s+)?(?:required|mandatory|essential)\b`, 'gi'),
   ];
-  for (const sentence of description.split(/(?<=[.!?])\s+|\n/).map(value => value.trim()).filter(Boolean)) {
+  const safeDescription = sanitizeJobDescriptionContent(description);
+  for (const sentence of safeDescription.split(/(?<=[.!?])\s+|\n/).map(value => value.trim()).filter(Boolean)) {
     if (/\b(?:unless|except|if)\b/i.test(sentence)) continue;
-    const citizen = sentence.match(/\b(?:must be an? Australian citizen|Australian citizenship is required|Australian citizens only)\b/i);
+    const citizen = sentence.match(/(?:^(?:[-+*•]\s*)?must be an? Australian citizen\s*[.!]?$|\b(?:you|the (?:successful )?(?:applicant|candidate)|applicants?|candidates?) must be an? Australian citizen\s*[.!]?$|\bAustralian citizenship is required(?: for (?:this|the) (?:role|position))?\s*[.!]?$|\bAustralian citizens only(?: may apply| will be considered)?\s*[.!]?$)/i);
     if (citizen && !/\b(?:not|no|or|preferred|desirable)\b/i.test(sentence)) {
       requirements.citizenship = 'required';
       requirementEvidence.citizenship = snippet(sentence, citizen);
     }
-    const sponsorship = sentence.match(/\b(?:cannot|can not|unable to|do not|don't|will not|won't) (?:offer|provide|support) (?:visa )?sponsorship\b|\bno visa sponsorship(?: is)? (?:available|provided|offered)\b|^no visa sponsorship[.!]?$/i);
+    const sponsorship = sentence.match(/\b(?:cannot|can not|unable to|do not|don't|will not|won't) (?:offer|provide|support) (?:visa )?sponsorship(?:\s+(?:for|in)\s+(?:this|the)\s+(?:role|position))?\s*[.!]?$|\bno visa sponsorship(?:(?: is)? (?:available|provided|offered))?(?:\s+(?:for|in)\s+(?:this|the)\s+(?:role|position))?\s*[.!]?$/i);
     if (sponsorship) {
       requirements.sponsorship = 'unavailable';
       requirementEvidence.sponsorship = snippet(sentence, sponsorship);
     }
-    const clearance = sentence.match(/\bmust (?:currently )?(?:hold|have) (?:an? )?(?:active |current )?(baseline|NV1|NV2|PV) (?:security )?clearance\b/i);
+    const clearance = sentence.match(/(?:^(?:[-+*•]\s*)?must|\b(?:you|the (?:successful )?(?:applicant|candidate)|applicants?|candidates?) must) (?:currently )?(?:hold|have) (?:an? )?(?:active |current )?(baseline|NV1|NV2|PV) (?:security )?clearance\b/i);
     if (clearance && !/\b(?:not|or|obtain|eligible|ability)\b/i.test(sentence)) {
       requirements.clearance = clearance[1].toLowerCase();
       requirementEvidence.clearance = snippet(sentence, clearance);
     }
-    if (!/\b(?:not|no|or|preferred|desired|desirable|ideally|optional|equivalent|recommended|beneficial|advantage)\b|nice.to.have|\b\d+\s*(?:-|–|to)\s*\d+\b/i.test(sentence)) {
+    const thirdPartyExperience = /\b(?:customers?|clients?|users?|operators?)\b|\b(?:screen|assess|evaluate|identify|support|serve)\w*\s+(?:candidates?|applicants?)\b|\b(?:candidates?|applicants?)\s+(?:who|with)\b/i.test(sentence);
+    if (!thirdPartyExperience && !/\b(?:not|no|or|preferred|desired|desirable|ideally|optional|equivalent|recommended|beneficial|advantage)\b|nice.to.have|\b\d+\s*(?:-|–|to)\s*\d+\b/i.test(sentence)) {
       for (const pattern of experiencePatterns) {
         for (const match of sentence.matchAll(pattern)) {
           const years = Number(match[1]);

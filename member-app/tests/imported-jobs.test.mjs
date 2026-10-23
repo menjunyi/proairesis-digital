@@ -132,3 +132,110 @@ test('untrusted source text remains data and cannot inject server-controlled fie
   assert.throws(() => normalizeImportedJob({...input, source: 'greenhouse'}), /unsupported fields/);
   assert.throws(() => normalizeImportedJob({...input, userSub: 'someone-else'}), /unsupported fields/);
 });
+
+test('hidden markup cannot create eligibility requirements', () => {
+  const constraint = 'Australian citizenship is required. No visa sponsorship is available. You must currently hold an active NV2 security clearance. At least 9 years of experience is required.';
+  const hidden = [
+    `<sCrIpT>${constraint}</sCrIpT>`,
+    `<template>${constraint}</template>`,
+    `<div hidden>${constraint}</div>`,
+    `<font title="${constraint}">Visible employer copy.</font>`,
+    `[Eligibility](https://example.test/(${constraint}))`,
+    `[eligibility]: https://example.test/check "${constraint}"`,
+  ].join('\n');
+  const supplied = `${hidden}\n${description}\n<!-- ${constraint}`;
+  const job = normalizeImportedJob({...input, description: supplied});
+  assert.equal(job.description, supplied);
+  assert.deepEqual(job.requirements, {citizenship: 'unknown', sponsorship: 'unknown', clearance: 'unknown', minimumYears: null});
+  assert.deepEqual(job.requirementEvidence, {});
+
+  for (const concealed of [
+    `<div style=display:none>${constraint}</div>`,
+    `<div style=visibility:hidden>${constraint}</div>`,
+    `<div style="display:n&#x6f;ne">${constraint}</div>`,
+    `<div style="display:/**/none">${constraint}</div>`,
+    `<div style="display/**/:none">${constraint}</div>`,
+    `<div style="visibility:h&#x69;dden">${constraint}</div>`,
+    `<div style="display:\\6e one">${constraint}</div>`,
+    `<div style="display:n\\6f ne">${constraint}</div>`,
+    `<div style="visibility:h\\69 dden">${constraint}</div>`,
+    `<div aria-hidden="tr&#x75;e">${constraint}</div>`,
+    `<code hidden>${constraint}</code>`,
+    `<code style="display:none">${constraint}</code>`,
+    `<head><title>${constraint}</title></head>`,
+    `<title>${constraint}</title>`,
+    `<dialog>${constraint}</dialog>`,
+    `<details>${constraint}</details>`,
+    `<datalist>${constraint}</datalist>`,
+    `<select><option>${constraint}</option></select>`,
+    `x<script>${constraint}</script>`,
+    `Array<script>${constraint}</script>`,
+    `x<style>${constraint}</style>`,
+    `x<template>${constraint}</template>`,
+    `<Script src=x>${constraint}`,
+    `<Style type=text/css>${constraint}`,
+    `<Svg aria-label=x>${constraint}`,
+    `<Template id=x>${constraint}`,
+    `<Script>${constraint}`,
+    `<script/>${constraint}`,
+    `<style/>${constraint}`,
+    `<template/>${constraint}`,
+    `<iframe/>${constraint}`,
+    `<svg/>${constraint}`,
+    `<div hidden/>${constraint}`,
+    `&lt;script&gt;${constraint}`,
+    `&#60;script&#62;${constraint}`,
+    `&lt;template&gt;${constraint}`,
+    `&lt;div hidden&gt;${constraint}`,
+  ]) {
+    const concealedJob = normalizeImportedJob({...input, description: `${description}\n${concealed}`});
+    assert.deepEqual(concealedJob.requirements, {citizenship: 'unknown', sponsorship: 'unknown', clearance: 'unknown', minimumYears: null}, concealed);
+    assert.deepEqual(concealedJob.requirementEvidence, {}, concealed);
+  }
+
+  for (const reference of [
+    `[candidate]:\n  https://example.test/React/AWS\n  "${constraint}"`,
+    `[candidate]: <https://example.test/apply>\n  "${constraint}"`,
+    `[candidate]:\nhttps://example.test/apply\n"${constraint}"`,
+    `[candidate]: <https://example.test/apply>\n"${constraint}"`,
+  ]) {
+    const referenceJob = normalizeImportedJob({...input, description: `${description}\n${reference}`});
+    assert.deepEqual(referenceJob.requirements, {citizenship: 'unknown', sponsorship: 'unknown', clearance: 'unknown', minimumYears: null});
+    assert.deepEqual(referenceJob.requirementEvidence, {});
+  }
+});
+
+test('requirements apply to the candidate, not customers or other third parties', () => {
+  for (const statement of [
+    'The customer must be an Australian citizen.',
+    'You will support each customer who must be an Australian citizen.',
+    'You will validate that each operator must have NV2 security clearance.',
+    'Australian citizenship is required for customers to open an account.',
+    'You will document whether Australian citizenship is required for customers.',
+    'The platform reports that Australian citizens only may access customer records.',
+  ]) {
+    const job = normalizeImportedJob({...input, description: `${description}\n${statement}`});
+    assert.equal(job.requirements.citizenship, 'unknown', statement);
+    assert.equal(job.requirements.clearance, 'unknown', statement);
+  }
+  for (const statement of [
+    'You will screen candidates who must have 10 years of experience.',
+    'The report identifies applicants with at least 12 years of experience.',
+    'Our customers require at least 9 years of experience for their own roles.',
+  ]) {
+    const job = normalizeImportedJob({...input, description: `${description}\n${statement}`});
+    assert.equal(job.requirements.minimumYears, null, statement);
+  }
+});
+
+test('qualified or contradictory sponsorship prose is not a candidate hard gate', () => {
+  for (const statement of [
+    'We do not offer sponsorship advice.',
+    'We cannot provide sponsorship documentation support, but visa sponsorship is available.',
+    'We do not offer visa sponsorship for internships, but this permanent role is eligible.',
+  ]) {
+    const job = normalizeImportedJob({...input, description: `${description}\n${statement}`});
+    assert.equal(job.requirements.sponsorship, 'unknown', statement);
+    assert.equal(job.requirementEvidence.sponsorship, undefined, statement);
+  }
+});

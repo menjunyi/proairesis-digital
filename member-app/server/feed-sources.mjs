@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {normalizeJob} from './matching.mjs';
+import {normalizeJob, sanitizeJobDescriptionSource} from './matching.mjs';
 
 const PROVIDERS = new Set(['greenhouse', 'lever', 'ashby']);
 const REGISTRY_KEYS = new Set(['provider', 'board', 'company', 'licenseApproved', 'licenseReference']);
@@ -60,14 +60,11 @@ function entities(value) {
 
 export function plainText(value) {
   if (typeof value !== 'string' || value.length > 120000) return '';
-  let text = entities(entities(value));
-  text = text.replace(/<!--[\s\S]*?(?:-->|$)/g, ' ')
-    .replace(/<(script|style|iframe|object|template|svg)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, ' ')
-    .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, '\n');
+  let text = sanitizeJobDescriptionSource(entities(entities(value)), {structured: true});
   text = Array.from(text, character => {
     const codePoint = character.codePointAt(0);
-    return character === '<' || character === '>' || codePoint <= 0x08 || codePoint === 0x0b ||
-      codePoint === 0x0c || codePoint >= 0x0e && codePoint <= 0x1f ? ' ' : character;
+    return codePoint <= 0x08 || codePoint === 0x0b || codePoint === 0x0c ||
+      codePoint >= 0x0e && codePoint <= 0x1f ? ' ' : character;
   }).join('');
   return text
     .replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -153,6 +150,7 @@ function requirements(description) {
     new RegExp(String.raw`\b${experience}\s+(?:(?:is|are)\s+)?(?:required|mandatory|essential)\b`, 'gi'),
   ];
   for (const sentence of description.split(/(?<=[.!?])\s+|\n/).map(line => line.trim()).filter(Boolean)) {
+    if (/\b(?:if|unless|except)\b/i.test(sentence)) continue;
     const citizenship = sentence.match(/\b(?:must be an? Australian citizen|Australian citizenship is required|Australian citizens only)\b/i);
     if (!/\b(?:not|no|or|preferred|desirable)\b/i.test(sentence)
       && citizenship) {
