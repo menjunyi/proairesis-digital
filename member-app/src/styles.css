@@ -1632,15 +1632,79 @@ button svg {
   font-size: var(--text-small);
   margin-top: 12px;
 }
-.job-description h3 {
-  font-size: var(--text-body);
-  margin-bottom: 13px;
+.processed-job-description {
+  margin-top: 24px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #fbfaf4;
 }
-.job-description > p {
-  font-size: var(--text-body);
+.processed-job-description h3 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.job-description-overview > p,
+.job-description-section > p,
+.job-description-empty {
   color: #657665;
-  line-height: 1.85;
-  white-space: pre-wrap;
+  font-size: var(--text-body);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.job-description-overview > p + p,
+.job-description-section > p + p {
+  margin-top: 9px;
+}
+.job-description-key-points > h3 {
+  margin-top: 20px;
+}
+.job-description-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 13px;
+  margin-top: 10px;
+}
+.job-description-section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e1e5d8;
+  border-radius: 14px;
+  background: #fff;
+}
+.job-description-section.tone-work,
+.job-description-section.tone-benefits {
+  background: #f3f6ed;
+}
+.job-description-section.tone-requirements {
+  background: #fff9eb;
+  border-color: #eee3c9;
+}
+.job-description-section h4 {
+  margin: 0 0 10px;
+  color: var(--teal);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: var(--text-body);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.job-description-section ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 19px;
+  color: #566a57;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.job-description-section > p + ul {
+  margin-top: 10px;
+}
+.job-description-source-note {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.55;
 }
 .source-detail {
   display: flex;
@@ -1992,13 +2056,9 @@ button svg {
   .application-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .application-summary > div:first-child {
-    grid-column: 1 / -1;
-  }
 }
 .application-summary h3 { font-size: 20px; margin-bottom: 10px; }
 .application-summary p,
-.application-workspace .job-description p,
 .application-workspace .evidence-section li > strong,
 .application-workspace .evidence-section li > p,
 .application-workspace .evidence-section > .subtle,
@@ -2008,14 +2068,7 @@ button svg {
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
-.application-supporting-details { margin: 0 0 24px; }
-.application-supporting-details > summary {
-  cursor: pointer;
-  font-size: var(--text-body);
-  font-weight: 600;
-  padding: 12px 0;
-  min-height: 44px;
-}
+.application-job-description { margin: 0 0 24px; }
 .application-controls .button { font-size: var(--text-body); min-height: 44px; }
 .letter-allowance {
   display: flex;
@@ -3579,15 +3632,8 @@ button svg {
   font-size: var(--text-small);
   line-height: 1.55;
 }
-.guest-match-details > section h3 {
-  margin-bottom: 8px;
-}
-.guest-match-details > section p {
-  color: var(--muted);
-  font-size: var(--text-body);
-  white-space: pre-line;
-  max-height: 260px;
-  overflow: auto;
+.guest-match-details > .processed-job-description {
+  margin-top: 0;
 }
 .guest-source-row {
   display: flex;

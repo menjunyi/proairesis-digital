@@ -5,7 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { jobBrief, matchSummary } from "./job-summary.js";
+import { matchSummary } from "./job-summary.js";
+import ProcessedJobDescription from "./ProcessedJobDescription.jsx";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -3210,7 +3211,7 @@ function MatchEvidence({ match }) {
   );
 }
 
-function OpportunityDialog({
+export function OpportunityDialog({
   match,
   onClose,
   onDecision,
@@ -3278,13 +3279,7 @@ function OpportunityDialog({
       </div>
       <ErrorBox error={error} />
       <MatchEvidence match={match} />
-      <section className="job-description">
-        <h3>About the opportunity</h3>
-        <p>
-          {job.description ||
-            "A full description is not available. Check the original listing for details."}
-        </p>
-      </section>
+      <ProcessedJobDescription job={job} />
       <div className="source-detail">
         <div>
           <strong>{job.source || "Original listing"}</strong>
@@ -3835,11 +3830,8 @@ export function ApplicationWorkspace({
       {tab === "details" ? (
         <div className="application-body">
           {pending && <p role="status">Your draft is being prepared. You can leave this page and return.</p>}
-          <section className="application-summary" aria-label="Job overview and fit">
-            <div>
-              <h3>About this role</h3>
-              <p>{jobBrief(job)}</p>
-            </div>
+          <ProcessedJobDescription job={job} className="application-job-description" />
+          <section className="application-summary" aria-label="Job fit summary">
             <div className="summary-fit">
               <h3>What fits</h3>
               <p>{summary.fit}</p>
@@ -3849,10 +3841,6 @@ export function ApplicationWorkspace({
               <p>{summary.gaps}</p>
             </div>
           </section>
-          <details className="application-supporting-details job-description">
-            <summary>Read the full job description</summary>
-            <p>{job.description}</p>
-          </details>
           <Field label="Your notes">
             <textarea
               rows="5"

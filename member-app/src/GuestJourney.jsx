@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ProcessedJobDescription from "./ProcessedJobDescription.jsx";
 import {
   ArrowLeft,
   ArrowRight,
@@ -525,10 +526,7 @@ function MatchesStep({ data, busy, error, onIgnore, onInterested, onRestart }) {
                 {open && (
                   <div className="guest-match-details">
                     <Evidence match={match} />
-                    <section>
-                      <h3>About the opportunity</h3>
-                      <p>{job.description || "Open the employer listing for the full description."}</p>
-                    </section>
+                    <ProcessedJobDescription job={job} />
                     <div className="guest-source-row">
                       <span>{job.sourceDisplay || job.source || "Source listing"}</span>
                       {link && <a className="text-link" href={link} target="_blank" rel="noopener noreferrer">Original listing <ArrowUpRight size={15} /></a>}
