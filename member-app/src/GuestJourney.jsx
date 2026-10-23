@@ -245,7 +245,7 @@ function ResumeStep({ busy, error, onUpload, onBack }) {
   );
 }
 
-function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
+export function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
   const [draft, setDraft] = useState(() => ({
     ...initial,
     workRights: !initial.confirmed && !initial.interviewCompleted && initial.workRights === "unknown" ? "" : initial.workRights || "",
@@ -383,6 +383,9 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
         <Field label="Skills found in your resume" hint="Remove anything the document did not support.">
           <input value={(draft.skills || []).join(", ")} onChange={(event) => set("skills", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
         </Field>
+        <Field label="Job titles to use for matching" hint="We suggested these from your resume. Remove past titles that should not influence your next-role recommendations.">
+          <input value={(draft.preferences?.roleTitles || []).join(", ")} onChange={(event) => setPreference("roleTitles", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
+        </Field>
       </div>
       <details className="guest-resume-review">
         <summary>Review the full extracted resume text</summary>
@@ -394,9 +397,6 @@ function ReviewStep({ initial, busy, error, onBack, onConfirm }) {
       </button>
       {showOptional && (
         <div className="profile-summary-grid optional-preferences">
-          <Field label="Preferred job titles">
-            <input value={(draft.preferences?.roleTitles || []).join(", ")} onChange={(event) => setPreference("roleTitles", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} />
-          </Field>
           <Field label="Preferred work arrangement">
             <select value={draft.preferences?.workplaceTypes?.[0] || ""} onChange={(event) => setPreference("workplaceTypes", event.target.value ? [event.target.value] : [])}>
               <option value="">No preference</option>

@@ -50,6 +50,8 @@ test('Greenhouse creates normalized source-specific jobs and leaves unstated eli
 test('AU locations include secondary locations but never infer AU from remote alone', async () => {
   const rows = [
     ashby({jobUrl: 'https://jobs.ashbyhq.com/example/foreign', location: 'Sydney, Nova Scotia', address: {postalAddress: {addressCountry: 'CAN'}}}),
+    ashby({jobUrl: 'https://jobs.ashbyhq.com/example/false-au-country', location: 'Sydney, Nova Scotia', address: {postalAddress: {addressCountry: 'AUS'}}}),
+    ashby({jobUrl: 'https://jobs.ashbyhq.com/example/foreign-title', title: 'Software Engineer - United States', location: 'Sydney', address: {postalAddress: {addressCountry: 'AUS'}}}),
     ashby({jobUrl: 'https://jobs.ashbyhq.com/example/remote', location: 'Remote', isRemote: true}),
     ashby({jobUrl: 'https://jobs.ashbyhq.com/example/secondary', location: 'London', address: {postalAddress: {addressCountry: 'GBR'}},
       secondaryLocations: [{location: 'Melbourne', address: {addressCountry: 'AUS'}}]}),
@@ -63,8 +65,9 @@ test('AU locations include secondary locations but never infer AU from remote al
 
 test('bare AU cities or Australian qualifiers are accepted without treating foreign namesakes as AU', async () => {
   const accepted = ['Sydney', 'Melbourne, VIC', 'Melbourne, Victoria 3000', 'Perth WA', 'NSW, Sydney',
-    'Remote, Australia', 'Sydney, AU', 'AU - Brisbane'];
-  const rejected = ['Melbourne, Florida', 'Melbourne Florida', 'Perth, Scotland', 'Perth Scotland',
+    'Remote, Australia', 'Sydney, AU', 'AU - Brisbane', 'New South Wales', 'Geelong', 'Ballarat, Victoria',
+    'Canada Bay, New South Wales', 'Jordan Springs, NSW 2747', 'Surry Hills, NSW', 'Cairns', 'Mackay', 'Greater Sydney Area'];
+  const rejected = ['Melbourne, Florida', 'Melbourne Florida', 'Perth, Scotland', 'Perth Scotland', 'Victoria',
     'Sydney, Nova Scotia', 'Melbourne, FL', 'Perth, Ontario', 'Remote', 'Worldwide', 'Sydney, unknown region'];
   const {jobs, metadata} = await fetchRows(approved(), {jobs: [...accepted, ...rejected].map((name, index) =>
     greenhouse({id: index + 1, location: {name}}))});

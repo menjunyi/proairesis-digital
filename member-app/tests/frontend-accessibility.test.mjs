@@ -46,6 +46,7 @@ runInNewContext(guestCompiled, {
 });
 const {
   GuestRestoreFailure,
+  ReviewStep,
   guestInterviewSubmissionMode,
   guestRestoreRecovery,
 } = guestModule.exports;
@@ -177,4 +178,38 @@ test("guest restore failures offer retry and explicit restart without implying l
   assert.match(html, /role="alert"/);
   assert.match(html, />Try again<\/button>/);
   assert.match(html, />Start a new search<\/button>/);
+});
+
+test("guest review visibly confirms resume-derived job titles before search", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ReviewStep, {
+      initial: {
+        name: "Synthetic Candidate",
+        location: "Sydney",
+        situation: "actively-looking",
+        roleFamilies: ["software"],
+        workRights: "unknown",
+        needsSponsorship: "unknown",
+        interviewCompleted: true,
+        resumeText: "Software Engineer at Example. Built TypeScript services.",
+        skills: ["TypeScript"],
+        yearsExperience: 3,
+        preferences: {
+          locations: ["Sydney"],
+          includeRemote: true,
+          roleTitles: ["Software Engineer"],
+          limitations: "",
+          workplaceTypes: [],
+        },
+      },
+      busy: false,
+      error: null,
+      onBack() {},
+      onConfirm() {},
+    }),
+  );
+  assert.match(html, /Job titles to use for matching/);
+  assert.match(html, /Remove past titles that should not influence your next-role recommendations/);
+  assert.match(html, /value="Software Engineer"/);
+  assert.ok(html.indexOf("Job titles to use for matching") < html.indexOf("optional job preferences"));
 });

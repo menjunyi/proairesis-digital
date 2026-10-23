@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {visibleGeographySupportsAustralia} from './job-geography.mjs';
 import {normalizeJob, sanitizeJobDescriptionSource} from './matching.mjs';
 
 const PROVIDERS = new Set(['greenhouse', 'lever', 'ashby']);
@@ -70,21 +71,7 @@ export function plainText(value) {
     .replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function australianLocation(name, country) {
-  const code = String(country ?? '').trim().toUpperCase();
-  if (code) return ['AU', 'AUS', 'AUSTRALIA'].includes(code);
-  const value = String(name ?? '').trim();
-  if (/\b(?:Canada|Nova Scotia|United States|USA|United Kingdom|UK|New Zealand|NZ)\b/i.test(value)) return false;
-  if (/\bAustralia\b|^AU(?:\s|:|-|$)|(?:[,;]\s*|\s+)AU$/i.test(value)) return true;
-  const city = '(?:Sydney|Melbourne|Brisbane|Canberra|Adelaide|Perth|Hobart|Darwin|Gold Coast|Wollongong)';
-  const state = '(?:NSW|New South Wales|VIC|Victoria|QLD|Queensland|ACT|Australian Capital Territory|SA|South Australia|WA|Western Australia|TAS|Tasmania|NT|Northern Territory)';
-  // Bare city names are accepted, but a foreign/unknown suffix is not discarded.
-  // City plus an Australian state may include a standard four-digit postcode.
-  return new RegExp(`^${city}(?:[,\\s]+${state}(?:\\s+\\d{4})?)?$`, 'i').test(value)
-    || new RegExp(`^${state}[,\\s]+${city}(?:\\s+\\d{4})?$`, 'i').test(value);
-}
-
-function locations(row, provider) {
+function locations(row, provider, title) {
   let entries;
   if (provider === 'ashby') {
     entries = [{name: row.location, country: row.address?.postalAddress?.addressCountry},
@@ -99,7 +86,11 @@ function locations(row, provider) {
     entries = [{name: row.location?.name}, ...(Array.isArray(row.offices)
       ? row.offices.map(office => ({name: office.location})) : [])];
   }
-  return [...new Set(entries.filter(item => australianLocation(item.name, item.country))
+  return [...new Set(entries.filter(item => visibleGeographySupportsAustralia({
+    title,
+    location: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : item.country ? 'Australia' : '',
+    countries: item.country ? [item.country] : [],
+  }))
     .map(item => typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'Australia'))];
 }
 
@@ -205,9 +196,9 @@ function sourceLink(row, source) {
 function sourceJob(row, source, fetchedAt) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) fail('invalid job record');
   if (source.provider === 'ashby' && row.isListed !== true) return null;
-  const australian = locations(row, source.provider);
-  if (!australian.length) return null;
   const title = plainText(source.provider === 'lever' ? row.text : row.title);
+  const australian = locations(row, source.provider, title);
+  if (!australian.length) return null;
   let description;
   if (source.provider === 'lever') {
     if (!Array.isArray(row.lists ?? [])) fail('invalid Lever description lists');

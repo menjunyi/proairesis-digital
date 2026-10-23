@@ -99,3 +99,16 @@ Confidence: **Confirmed**
 7. Remove previous snapshot
 
 Evidence: `infra/template.mjs:171-172`, `server/handler.mjs:86`, `server/adapters.mjs:109-150`
+
+## Live Australian job search
+
+Confidence: **Confirmed**
+
+1. Request only Australian technology facets from the licensed Freehire endpoint
+2. Retry one transient transport or body-stream failure with a fresh eight-second boundary
+3. Require a direct supported ATS source and an `AU` country facet
+4. Reject visible foreign-only titles, locations and foreign city namesakes
+5. Accept explicit Australian, regional Australian and non-contradictory global-remote labels
+6. Normalise and rank only the remaining current roles
+
+Evidence: `server/job-geography.mjs`, `server/freehire.mjs`, `server/feed-sources.mjs`, `tests/job-geography.test.mjs`, `tests/freehire.test.mjs`, `tests/feed-sources.test.mjs`

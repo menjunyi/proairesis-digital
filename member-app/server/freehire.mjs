@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {isIP} from 'node:net';
 import {explicitRequirements} from './imported-jobs.mjs';
+import {visibleGeographySupportsAustralia} from './job-geography.mjs';
 import {detectSkills, normalizeJob, sanitizeJobDescriptionContent} from './matching.mjs';
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -72,6 +73,8 @@ function normalizeFreehire(row, licenseReference, fetchedAt) {
   if (!row || typeof row !== 'object' || Array.isArray(row) || row.manually_added === true) return null;
   const upstream = String(row.source ?? '').trim().toLowerCase();
   if (!DIRECT_SOURCES.has(upstream) || !Array.isArray(row.countries) || !row.countries.some(country => String(country).toUpperCase() === 'AU')) return null;
+  const title = String(row.title ?? '').trim(), location = String(row.location ?? 'Australia').trim() || 'Australia';
+  if (!visibleGeographySupportsAustralia({title, location, countries: row.countries})) return null;
   const category = String(row.enrichment?.category ?? '').toLowerCase(), roleFamily = CATEGORY_FAMILY.get(category);
   if (!roleFamily || row.closed_at) return null;
   const description = typeof row.description === 'string' ? row.description.replace(/\u0000/g, '').trim() : '';
@@ -84,8 +87,8 @@ function normalizeFreehire(row, licenseReference, fetchedAt) {
   const employment = String(row.enrichment?.employment_type ?? '').toLowerCase();
   const seniority = String(row.enrichment?.seniority ?? 'unknown').toLowerCase();
   const job = normalizeJob({
-    id: slug, title: String(row.title ?? '').trim(), company: String(row.company ?? '').trim(), country: 'AU', roleFamily,
-    location: String(row.location ?? 'Australia').trim() || 'Australia', url, sourceUrl: url, description,
+    id: slug, title, company: String(row.company ?? '').trim(), country: 'AU', roleFamily,
+    location, url, sourceUrl: url, description,
     workplaceType: ({remote: 'remote', hybrid: 'hybrid', onsite: 'on-site'})[workMode] ?? 'unknown',
     employmentType: ({full_time: 'full-time', part_time: 'part-time', contract: 'contract', internship: 'internship', fellowship: 'fellowship'})[employment] ?? 'unknown',
     seniority: ({middle: 'mid', c_level: 'executive', intern: 'junior'})[seniority] ?? seniority,
