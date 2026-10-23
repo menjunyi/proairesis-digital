@@ -6,6 +6,7 @@ import {detectSkills, normalizeJob, sanitizeJobDescriptionContent} from './match
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_RESULTS = 100;
 const TIMEOUT_MS = 8000;
+const MAX_TRANSPORT_ATTEMPTS = 2;
 const DIRECT_SOURCES = new Set([
   'ashby', 'bamboohr', 'comeet', 'greenhouse', 'icims', 'jobvite', 'lever', 'oracle', 'personio',
   'recruitee', 'smartrecruiters', 'successfactors', 'teamtailor', 'workable', 'workday',
@@ -43,15 +44,14 @@ async function boundedJson(response, controller) {
     throw new FreehireError('JOB_SEARCH_UNAVAILABLE', 'The live job source returned an invalid response. Try again shortly.');
   }
   const chunks = [];let size = 0;
+  for await (const chunk of response.body) {
+    const bytes = Buffer.from(chunk);size += bytes.length;
+    if (size > MAX_RESPONSE_BYTES) { controller.abort();throw new FreehireError('JOB_SEARCH_UNAVAILABLE', 'The live job source returned too much data. Try again shortly.'); }
+    chunks.push(bytes);
+  }
   try {
-    for await (const chunk of response.body) {
-      const bytes = Buffer.from(chunk);size += bytes.length;
-      if (size > MAX_RESPONSE_BYTES) { controller.abort();throw new FreehireError('JOB_SEARCH_UNAVAILABLE', 'The live job source returned too much data. Try again shortly.'); }
-      chunks.push(bytes);
-    }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch (error) {
-    if (error instanceof FreehireError) throw error;
+  } catch {
     throw new FreehireError('JOB_SEARCH_UNAVAILABLE', 'The live job source returned an invalid response. Try again shortly.');
   }
 }
@@ -119,11 +119,18 @@ export function createFreehireSearch(env, dependencies = {}) {
       url.searchParams.set('source', [...DIRECT_SOURCES].join(','));
       url.searchParams.set('description_format', 'text');url.searchParams.set('limit', String(MAX_RESULTS));
       url.searchParams.set('sort', 'posted_at');url.searchParams.set('order', 'desc');url.searchParams.set('open_within_days', '90');
-      const controller = new AbortController();const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      let response;
+      let result;
       try {
-        response = await fetchImpl(url, {redirect: 'error', signal: controller.signal, headers: {Accept: 'application/json'}});
-        const result = await boundedJson(response, controller);
+        for(let attempt=1;attempt<=MAX_TRANSPORT_ATTEMPTS;attempt++){
+          const controller = new AbortController();const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+          try {
+            const response = await fetchImpl(url, {redirect: 'error', signal: controller.signal, headers: {Accept: 'application/json'}});
+            result = await boundedJson(response, controller);
+            break;
+          } catch(error) {
+            if(error instanceof FreehireError || attempt===MAX_TRANSPORT_ATTEMPTS)throw error;
+          } finally { clearTimeout(timer);controller.abort(); }
+        }
         const returnedLimit=Number(result?.meta?.limit);
         if (!Array.isArray(result?.data) || !Number.isSafeInteger(returnedLimit) || returnedLimit<1
           || returnedLimit>MAX_RESULTS || result.data.length>returnedLimit) {
@@ -142,7 +149,7 @@ export function createFreehireSearch(env, dependencies = {}) {
       } catch (error) {
         if (error instanceof FreehireError) throw error;
         throw new FreehireError('JOB_SEARCH_UNAVAILABLE', 'Live job search is temporarily unavailable. Try again shortly.');
-      } finally { clearTimeout(timer);controller.abort(); }
+      }
     },
   };
 }

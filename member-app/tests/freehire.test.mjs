@@ -41,6 +41,39 @@ test('Freehire accepts its documented boundary of one hundred direct ATS jobs',a
   assert.equal(result.jobs.length,100);assert.equal(result.source.returned,100);assert.equal(result.source.accepted,100);
 });
 
+test('Freehire retries one transport failure without weakening response validation',async()=>{
+  let attempts=0;
+  const search=createFreehireSearch(env,{fetchImpl:async()=>{
+    attempts++;
+    if(attempts===1)throw Object.assign(new Error('synthetic timeout'),{name:'AbortError'});
+    return response({data:[direct],meta:{total:1,limit:100,offset:0}});
+  }});
+  assert.equal((await search.search(profile)).jobs.length,1);
+  assert.equal(attempts,2);
+
+  attempts=0;
+  const interrupted=createFreehireSearch(env,{fetchImpl:async()=>{
+    attempts++;
+    if(attempts===1)return {
+      ok:true,redirected:false,headers:{get:name=>name==='content-type'?'application/json':null},
+      body:{async *[Symbol.asyncIterator](){yield Buffer.from('{"data":');throw new TypeError('synthetic body reset');}},
+    };
+    return response({data:[direct],meta:{total:1,limit:100,offset:0}});
+  }});
+  assert.equal((await interrupted.search(profile)).jobs.length,1);
+  assert.equal(attempts,2);
+
+  attempts=0;
+  const unavailable=createFreehireSearch(env,{fetchImpl:async()=>{attempts++;throw new TypeError('synthetic network failure');}});
+  await assert.rejects(()=>unavailable.search(profile),error=>error.code==='JOB_SEARCH_UNAVAILABLE');
+  assert.equal(attempts,2);
+
+  attempts=0;
+  const invalid=createFreehireSearch(env,{fetchImpl:async()=>{attempts++;return new Response('not json',{status:502,headers:{'content-type':'text/plain'}});}});
+  await assert.rejects(()=>invalid.search(profile),error=>error.code==='JOB_SEARCH_UNAVAILABLE');
+  assert.equal(attempts,1);
+});
+
 test('Freehire refuses ignored safety filters and oversized result sets with honest errors',async()=>{
   const ignored=createFreehireSearch(env,{fetchImpl:async()=>response({data:[direct],meta:{total:1,limit:100,offset:0,ignored_params:['countries']}})});
   await assert.rejects(()=>ignored.search(profile),error=>error.code==='JOB_SEARCH_UNAVAILABLE'&&/filters/.test(error.message));
