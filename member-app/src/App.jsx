@@ -1008,7 +1008,7 @@ export default function App() {
               <span>
                 <strong>{me?.profile?.name || "Your account"}</strong>
                 <small>
-                  {me?.billing?.plan === "monthly"
+                  {["monthly", "prepaid"].includes(me?.billing?.plan)
                     ? "RoleClue Plus"
                     : me?.billing?.hasSubscription
                       ? "Subscription needs attention"
@@ -1352,13 +1352,20 @@ function PlanGate({
             <span className="plan-name"><span className="eyebrow">PLUS</span><strong>A$20</strong><small>per month</small></span>
             <span className="plan-description"><strong>50 successful cover letters each paid period</strong><small>Renews monthly until cancelled. No rollover and no free trial.</small></span>
           </label>
+          <label className={cx("plan-gate-option", selectedPlan === "prepaid" && "selected")}>
+            <input type="radio" name="continuation-plan" value="prepaid" checked={selectedPlan === "prepaid"} onChange={() => { setSelectedPlan("prepaid"); setAccepted(false); }} />
+            <span className="plan-price">A$20 once</span>
+            <span className="plan-description"><strong>WeChat Pay / Alipay · 50 cover letters</strong><small>30 days of access. No automatic renewal; unused generations expire.</small></span>
+          </label>
         </fieldset>
         <label className="check-line plan-terms">
           <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} disabled={!selectedPlan || Boolean(busy)} />
           <span>
             {selectedPlan === "starter"
               ? <>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">membership and refund terms</a>. I authorise one A$1 payment for two cover letters. Starter does not renew.</>
-              : selectedPlan === "monthly"
+              : selectedPlan === "prepaid"
+                ? <>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">membership and refund terms</a>. I authorise one A$20 payment for 50 cover letters valid for 30 days, without renewal.</>
+                : selectedPlan === "monthly"
                 ? <>I agree to the <a href="/terms.html" target="_blank" rel="noreferrer">membership and refund terms</a>. I understand that Plus costs A$20 monthly and renews until cancelled.</>
                 : "Choose a plan to review its payment terms."}
           </span>
@@ -1366,7 +1373,7 @@ function PlanGate({
         <button className="button plan-continue" disabled={!selectedPlan || !accepted || Boolean(busy)} onClick={checkout}>
           {busy === "checkout"
             ? <Spinner>Opening secure checkout</Spinner>
-            : <>{selectedPlan === "starter" ? "Buy Starter for A$1" : selectedPlan === "monthly" ? "Subscribe for A$20/month" : "Choose a plan"} <ArrowRight size={18} /></>}
+            : <>{selectedPlan === "starter" ? "Buy Starter for A$1" : selectedPlan === "prepaid" ? "Pay A$20 once" : selectedPlan === "monthly" ? "Subscribe for A$20/month" : "Choose a plan"} <ArrowRight size={18} /></>}
         </button>
         {(returnKind === "success" || message.includes("processing")) && (
           <button className="text-link verify-payment" disabled={Boolean(busy)} onClick={verifyAgain}>Check payment again</button>
@@ -4158,7 +4165,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
   }, []);
   const exhausted = plan.paid && billing?.remaining === 0;
   const manageExisting = plan.hasSubscription || plan.paid;
-  const checkoutPlan = plan.canBuyStarter ? selectedPlan : "monthly";
+  const checkoutPlan = plan.canBuyStarter || selectedPlan !== "starter" ? selectedPlan : "monthly";
   const checkoutIsStarter = checkoutPlan === "starter";
   function choosePlan(value) {
     setSelectedPlan(value);
@@ -4226,14 +4233,14 @@ export function UpgradeDialog({ api, billing, onClose }) {
             : `You have ${billing.remaining} generations available. ${plan.periodLabel}.`)
           : plan.starter
             ? `You have ${billing?.remaining ?? 0} of ${billing?.limit ?? 2} Starter generations available. If you subscribe, Plus generations are used first and these unused Starter generations remain for later.`
-            : "There is no free generation trial. Buy two Starter generations once, or choose a monthly allowance."}
+            : "There is no free generation trial. Buy Starter once, or choose Plus with monthly renewal or a one-time 30-day payment."}
       </p>
       {manageExisting && (
         <>
           <ErrorBox error={error} />
           {plan.canManageBilling && (
             <button className="button full" disabled={busy} onClick={portal}>
-              {busy ? <Spinner>Opening Stripe</Spinner> : <>Manage subscription <ArrowUpRight size={17} /></>}
+              {busy ? <Spinner>Opening Stripe</Spinner> : <>{plan.prepaid ? "Open Stripe billing portal" : "Manage subscription"} <ArrowUpRight size={17} /></>}
             </button>
           )}
         </>
@@ -4289,12 +4296,12 @@ export function UpgradeDialog({ api, billing, onClose }) {
                 </span>
               </label>
             )}
-            <label className={cx("pricing-option", !checkoutIsStarter && "selected")}>
+            <label className={cx("pricing-option", checkoutPlan === "monthly" && "selected")}>
               <input
                 type="radio"
                 name="cover-letter-plan"
                 value="monthly"
-                checked={!checkoutIsStarter}
+                checked={checkoutPlan === "monthly"}
                 disabled={busy}
                 onChange={() => choosePlan("monthly")}
               />
@@ -4311,6 +4318,13 @@ export function UpgradeDialog({ api, billing, onClose }) {
                 Renews monthly until cancelled. Unused monthly generations do not roll over.
               </span>
             </label>
+            <label className={cx("pricing-option", checkoutPlan === "prepaid" && "selected")}>
+              <input type="radio" name="cover-letter-plan" value="prepaid" checked={checkoutPlan === "prepaid"} disabled={busy} onChange={() => choosePlan("prepaid")} />
+              <span className="pricing-option-header"><span className="eyebrow">PLUS · PAY ONCE</span><span className="pricing-tag">WECHAT PAY / ALIPAY</span></span>
+              <span className="pricing-amount"><strong>A$20</strong><small>one time</small></span>
+              <span className="pricing-allowance">50 successful cover letters for 30 days</span>
+              <span className="pricing-detail">Choose WeChat Pay or Alipay at checkout. No automatic renewal. Unused generations expire.</span>
+            </label>
           </fieldset>
           <ul className="plan-benefits">
             <li>
@@ -4325,6 +4339,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
           <div className="billing-explanation">
             {checkoutIsStarter
               ? "One A$1 payment. This is not a subscription. Each successful draft uses one of the two Starter generations; failed drafts do not."
+              : checkoutPlan === "prepaid" ? "One A$20 payment for 50 successful cover letters over 30 days. No automatic renewal. Unused generations expire."
               : "A$20 is charged now, then monthly until cancelled. Each successful draft uses one of the 50 monthly generations; failed drafts do not."}
           </div>
           <label className="check-line">
@@ -4336,6 +4351,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
             <span>
               {checkoutIsStarter
                 ? "I understand this is a one-time A$1 payment for 2 successful cover-letter generations and is not a subscription."
+                : checkoutPlan === "prepaid" ? "I authorise one A$20 payment for 50 successful cover letters valid for 30 days. This does not renew."
                 : "I understand this is an A$20 monthly subscription with 50 successful cover-letter generations per billing period."}{" "}
               I accept the <a href="/terms.html" target="_blank" rel="noopener noreferrer">RoleClue terms</a>.
             </span>
@@ -4352,7 +4368,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
               <>
                 {checkoutIsStarter
                   ? "Buy Starter for A$1"
-                  : "Subscribe for A$20 per month"}
+                  : checkoutPlan === "prepaid" ? "Pay A$20 once" : "Subscribe for A$20 per month"}
                 <ArrowUpRight size={17} />
               </>
             )}
@@ -4538,7 +4554,7 @@ export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice,
                 : "A$0"}
             <span>
               {plan.paid || plan.hasSubscription
-                ? "per month"
+                ? plan.prepaid ? "one-time · 30 days" : "per month"
                 : plan.starter
                   ? "one-time purchase"
                   : "no cover-letter credits"}
@@ -4568,7 +4584,7 @@ export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice,
               <Sparkles size={18} />
               <span>
                 <strong>No cover-letter credits are active.</strong>
-                Choose Starter for two generations or Plus for 50 each month.
+                Choose Starter for two generations, a monthly Plus plan, or a one-time 30-day Plus period.
               </span>
             </div>
           ) : (
@@ -4598,7 +4614,7 @@ export function AccountScreen({ api, config, me, onBilling, onUpgrade, onNotice,
                   <Spinner>Opening Stripe</Spinner>
                 ) : (
                   <>
-                    {plan.hasSubscription || plan.paid
+                    {plan.hasSubscription || plan.paid && !plan.prepaid
                       ? "Manage subscription"
                       : "Open Stripe billing portal"}
                     <ArrowUpRight size={17} />

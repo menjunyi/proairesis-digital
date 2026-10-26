@@ -7,11 +7,12 @@ export function billingReturnKind(search) {
 
 export function billingReturnPlan(search) {
   const plan = new URLSearchParams(search).get("plan");
-  return ["starter", "monthly"].includes(plan) ? plan : null;
+  return ["starter", "monthly", "prepaid"].includes(plan) ? plan : null;
 }
 
 export function billingPresentation(billing, formatDate) {
-  const paid = billing?.plan === "monthly";
+  const paid = ["monthly", "prepaid"].includes(billing?.plan);
+  const prepaid = billing?.plan === "prepaid";
   const starter = billing?.plan === "starter";
   const hasSubscription = billing?.hasSubscription === true;
   const cancelAtPeriodEnd = billing?.cancelAtPeriodEnd === true;
@@ -29,7 +30,9 @@ export function billingPresentation(billing, formatDate) {
     billing?.canPurchaseStarter !== false &&
     billing?.canBuyStarter !== false;
   let message = "";
-  if (paid && cancelAtPeriodEnd) {
+  if (prepaid) {
+    message = "Paid once with no automatic renewal. Your remaining allowance expires at the end of the 30-day period.";
+  } else if (paid && cancelAtPeriodEnd) {
     message = `Cancellation is scheduled. Your remaining paid allowance is available until ${formatDate(billing.periodEnd)}. It will not renew.`;
   } else if (billing?.status === "refunded") {
     message = hasSubscription
@@ -44,6 +47,7 @@ export function billingPresentation(billing, formatDate) {
   }
   return {
     paid,
+    prepaid,
     starter,
     hasSubscription,
     canSubscribe: !hasSubscription && !paid,
@@ -68,6 +72,9 @@ export function billingReturnOutcome(kind, billing, expectedPlan = null) {
         ? "verified"
         : "waiting";
     }
+    if (expectedPlan === "prepaid") {
+      return billing?.plan === "prepaid" && billing?.status === "active" ? "verified" : "waiting";
+    }
     if (expectedPlan === "monthly") {
       return billing?.plan === "monthly" && billing?.status === "active"
         ? "verified"
@@ -79,7 +86,7 @@ export function billingReturnOutcome(kind, billing, expectedPlan = null) {
 }
 
 export function billingCheckoutBody(plan) {
-  if (!["starter", "monthly"].includes(plan)) {
+  if (!["starter", "monthly", "prepaid"].includes(plan)) {
     throw new Error("Choose a valid cover-letter plan.");
   }
   return { plan, termsAccepted: true };

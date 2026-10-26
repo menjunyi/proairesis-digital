@@ -8,7 +8,7 @@ RoleClue helps Australian technology job seekers review their resume, confirm wo
 - DynamoDB stores each account under `USER#<Cognito sub>`.
 - Private S3 storage holds original resumes for no more than seven days.
 - Freehire supplies current Australian employer-ATS listings through its public API.
-- Stripe sells an A$1 Starter pack with two successful letters and an A$20 monthly plan with 50 successful letters.
+- Stripe sells an A$1 Starter pack with two successful letters, an A$20 monthly subscription with 50 letters, and an A$20 one-time prepaid period with 50 letters for 30 days. WeChat Pay and Alipay use payment-mode checkout; the prepaid offer never creates a subscription. Access requires verified payment and is revoked on any refund or dispute. Active paid periods cannot be stacked.
 - OpenAI creates cover-letter drafts. RoleClue applies a hard US$1 daily spend ceiling. Paid generation and daily recommendations use separate durable SQS queues, with dead-letter handling and operator alarms. A DynamoDB outbox and five-minute repair schedule recover pre-provider dispatches even after the user closes the browser. A bounded two-pass migration also enrolls pending generations created before the outbox release.
 - CloudFront is the only public API entry point. Its API origin policy sets the viewer address from the trusted connection and overwrites any client copy. Its origin adds a private credential before API Gateway sends the request to Lambda. Guest rate limits use that address only after the origin check succeeds.
 
@@ -78,3 +78,9 @@ After review, repeat the command with `--apply`. This changes the live alias and
 - Keep Stripe webhook signing enabled. Browser redirects never grant access.
 - Run a tenant-isolation smoke test after each production deployment.
 - Run the delivered-email signup and password-recovery smoke after every Cognito email configuration change and before expanding registration.
+
+## One-time wallet acceptance — 26 October 2026
+
+The `prepaid` checkout uses A$20 once for 50 successful letters over 30 days, with no subscription. It is selected before opening Stripe Checkout because a subscription-mode session cannot switch to a one-time wallet purchase. Stripe chooses eligible methods from the merchant configuration. Starter remains a one-time A$1 purchase.
+
+Both WeChat Pay and Alipay completed actual Stripe sandbox authorization. Canonical Checkout/PaymentIntent/charge reconciliation granted 50 prepaid letters, returned no subscription, and preserved the same allowance on repeated verification. The local UI was checked at 390, 768 and 1280 pixels. No live test payments were made. Live wallet activation requests currently show **Pending approval**; the source change is prepared for review and has not been released.
