@@ -4216,15 +4216,12 @@ export function UpgradeDialog({ api, billing, onClose }) {
   }
   return (
     <Dialog title="COVER LETTER PLANS" onClose={onClose} className="upgrade-dialog">
-      <span className="upgrade-icon">
-        <Sparkles size={30} />
-      </span>
       <h2>
         {manageExisting
           ? exhausted ? "Your allowance has been used." : "Your RoleClue Plus plan."
           : plan.starter
             ? "Keep your search moving."
-            : "Choose how you want to start."}
+            : "Choose your cover-letter plan."}
       </h2>
       <p>
         {manageExisting
@@ -4233,7 +4230,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
             : `You have ${billing.remaining} generations available. ${plan.periodLabel}.`)
           : plan.starter
             ? `You have ${billing?.remaining ?? 0} of ${billing?.limit ?? 2} Starter generations available. If you subscribe, Plus generations are used first and these unused Starter generations remain for later.`
-            : "There is no free generation trial. Buy Starter once, or choose Plus with monthly renewal or a one-time 30-day payment."}
+            : "Pay once or subscribe monthly. There is no free generation trial."}
       </p>
       {manageExisting && (
         <>
@@ -4283,8 +4280,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
                   onChange={() => choosePlan("starter")}
                 />
                 <span className="pricing-option-header">
-                  <span className="eyebrow">STARTER</span>
-                  <span className="pricing-tag">START SMALL</span>
+                  <span className="eyebrow">Starter</span>
                 </span>
                 <span className="pricing-amount">
                   <strong>A$1</strong>
@@ -4306,8 +4302,7 @@ export function UpgradeDialog({ api, billing, onClose }) {
                 onChange={() => choosePlan("monthly")}
               />
               <span className="pricing-option-header">
-                <span className="eyebrow">PLUS</span>
-                <span className="pricing-tag monthly">FOR AN ACTIVE SEARCH</span>
+                <span className="eyebrow">Plus monthly</span>
               </span>
               <span className="pricing-amount">
                 <strong>A$20</strong>
@@ -4320,10 +4315,10 @@ export function UpgradeDialog({ api, billing, onClose }) {
             </label>
             <label className={cx("pricing-option", checkoutPlan === "prepaid" && "selected")}>
               <input type="radio" name="cover-letter-plan" value="prepaid" checked={checkoutPlan === "prepaid"} disabled={busy} onChange={() => choosePlan("prepaid")} />
-              <span className="pricing-option-header"><span className="eyebrow">PLUS · PAY ONCE</span><span className="pricing-tag">WECHAT PAY / ALIPAY</span></span>
+              <span className="pricing-option-header"><span className="eyebrow">Plus pay once</span></span>
               <span className="pricing-amount"><strong>A$20</strong><small>one time</small></span>
               <span className="pricing-allowance">50 successful cover letters for 30 days</span>
-              <span className="pricing-detail">Choose WeChat Pay or Alipay at checkout. No automatic renewal. Unused generations expire.</span>
+              <span className="pricing-detail">WeChat Pay at checkout. No renewal. Unused generations expire.</span>
             </label>
           </fieldset>
           <ul className="plan-benefits">
