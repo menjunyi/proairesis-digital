@@ -1,3 +1,4 @@
+import {prepaidActive} from './prepaid-billing.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {change,retryConflict,Conflict} from './store.mjs';
 import {assess,assessWithReasons,ROLE_FAMILIES} from './matching.mjs';
@@ -89,25 +90,26 @@ export const blankEntitlement=()=>({
   paid:{key:null,used:0,reserved:0},subscriptionEverPaid:false,status:'none',customerId:null,subscriptionId:null,periodStart:null,periodEnd:null,
 });
 export function billingView(e=blankEntitlement(),now=Date.now()) {
+  const walletActive=prepaidActive(e,now);
   const monthlyActive=e.status==='active'&&Date.parse(e.periodEnd)>now;
   const starter=e.starter??{key:null,purchaseId:null,status:'none',used:0,reserved:0};
   const starterPurchased=starter.everPaid===true||Boolean(starter.purchaseId??starter.key);
   const starterActive=Boolean(starter.key&&starter.purchaseId)&&starter.status==='active';
-  const canPurchaseStarter=!starterPurchased&&e.subscriptionEverPaid!==true;
-  const plan=monthlyActive?'monthly':starterActive?'starter':'free';
-  const bucket=monthlyActive?(e.paid??{used:0,reserved:0}):starterActive?starter:{used:0,reserved:0};
-  const limit=monthlyActive?MONTHLY_GENERATION_LIMIT:starterActive?STARTER_GENERATION_LIMIT:0;
+  const canPurchaseStarter=!starterPurchased&&e.subscriptionEverPaid!==true&&e.prepaid?.everPaid!==true;
+  const plan=monthlyActive?'monthly':walletActive?'prepaid':starterActive?'starter':'free';
+  const bucket=monthlyActive?(e.paid??{used:0,reserved:0}):walletActive?e.prepaid:starterActive?starter:{used:0,reserved:0};
+  const limit=monthlyActive||walletActive?MONTHLY_GENERATION_LIMIT:starterActive?STARTER_GENERATION_LIMIT:0;
   const used=Number.isInteger(bucket.used)?bucket.used:0,reserved=Number.isInteger(bucket.reserved)?bucket.reserved:0;
   const remaining=Math.max(0,limit-used-reserved);
-  const effectiveStatus=starterActive&&!monthlyActive?'active':!monthlyActive&&['refunded','disputed'].includes(starter.status)?starter.status:e.status;
+  const effectiveStatus=starterActive&&!monthlyActive?'active':!monthlyActive&&['refunded','disputed'].includes(starter.status)?starter.status:!monthlyActive&&['refunded','disputed'].includes(e.prepaid?.status)?e.prepaid.status:e.status;
   return {
-    plan,status:effectiveStatus,subscriptionStatus:e.subscriptionStatus??e.status,
+    plan,status:walletActive&&!monthlyActive?'active':effectiveStatus,subscriptionStatus:e.subscriptionStatus??e.status,
     hasSubscription:hasManagedSubscription(e),cancelAtPeriodEnd:e.cancelAtPeriodEnd===true,
     priceAud:plan==='starter'?1:20,monthlyPriceAud:20,starterPriceAud:1,limit,used,reserved,remaining,
-    periodEnd:monthlyActive?e.periodEnd:null,canGenerate:remaining>0,canManageBilling:Boolean(e.customerId),
+    periodEnd:monthlyActive?e.periodEnd:walletActive?e.prepaid.periodEnd:null,canGenerate:remaining>0,canManageBilling:Boolean(e.customerId),
     starterStatus:starter.status??'none',starterPurchased,starterEverPaid:starterPurchased,subscriptionEverPaid:e.subscriptionEverPaid===true,
     canPurchaseStarter,canBuyStarter:canPurchaseStarter,starterEligible:canPurchaseStarter,
-    reason:remaining?null:monthlyActive?'ALLOWANCE_EXHAUSTED':starterPurchased?'UPGRADE_REQUIRED':'STARTER_REQUIRED',
+    reason:remaining?null:monthlyActive||walletActive?'ALLOWANCE_EXHAUSTED':e.prepaid?.everPaid?'UPGRADE_REQUIRED':starterPurchased?'UPGRADE_REQUIRED':'STARTER_REQUIRED',
   };
 }
 function safeString(v,max=250){return typeof v==='string'?v.trim().slice(0,max):'';}
@@ -1047,7 +1049,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
             :'Your two starter cover letters have been used. Subscribe for A$20/month for 50 letters.';
         fail(402,view.reason,message);
       }
-      const bucket=view.plan==='monthly'?'paid':'starter';e[bucket]??={key:null,purchaseId:null,status:'none',used:0,reserved:0};e[bucket].reserved++;
+      const bucket=view.plan==='monthly'?'paid':view.plan==='prepaid'?'prepaid':'starter';e[bucket]??={key:null,purchaseId:null,status:'none',used:0,reserved:0};e[bucket].reserved++;
       const generation={id,appId,status:'pending',createdAt:iso(),bucket,periodKey:e[bucket].key??'lifetime',profileSnapshot:profile.value,jobSnapshot:app.value.job,...(input.aiProcessingConfirmed===true?{aiConsentAt:iso(),aiConsentVersion:'roleclue-ai-2026-10-12'}:{})};
       const registry=await store.get(GENERATION_OUTBOX_PK,outboxSk);
       if(registry&&!validGenerationRegistration(registry))throw Error('Pending generation registry conflict');
@@ -1067,7 +1069,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
       if(registry&&!validGenerationRegistration(registry))throw Error('Pending generation registry conflict');
       if(!row||row.value.status!=='pending'){if(registry)await store.transact([{pk:registry.pk,sk:registry.sk,expected:registry.revision,remove:true}]);return;}
       const g=row.value,[eRow,appRow]=await Promise.all([store.get(pk,'ENTITLEMENT'),store.get(pk,`APP#${g.appId}`)]),e=eRow?.value??blankEntitlement(),bucket=e[g.bucket];const bucketMatches=g.bucket==='free'||bucket?.key===g.periodKey;
-      const accessRevoked=g.bucket==='starter'&&['refunded','disputed'].includes(bucket?.status)||g.bucket==='paid'&&['refunded','disputed'].includes(e.status);
+      const accessRevoked=g.bucket==='prepaid'&&['refunded','disputed'].includes(bucket?.status)||g.bucket==='starter'&&['refunded','disputed'].includes(bucket?.status)||g.bucket==='paid'&&['refunded','disputed'].includes(e.status);
       const acceptedText=text&&!accessRevoked?text:null;
       if(bucketMatches){bucket.reserved=Math.max(0,bucket.reserved-1);if(acceptedText)bucket.used++;}
       const safe=publicGeneration(g),letter=acceptedText?{id,text:acceptedText,createdAt:iso(),editedAt:null}:undefined;
@@ -1112,12 +1114,13 @@ export function createService({store,mode='production',provider,dispatch,files,b
   async function checkout(user,input){
     if(input.termsAccepted!==true)fail(400,'TERMS_REQUIRED','Accept the membership terms before subscribing.');
     if(!billing)fail(503,'SERVICE_UNAVAILABLE','Subscriptions are not yet enabled.');
-    const plan=input.plan??'monthly';if(!['starter','monthly'].includes(plan))fail(400,'INVALID_PLAN','Choose the A$1 starter pack or A$20 monthly plan.');
+    const plan=input.plan??'monthly';if(!['starter','monthly','prepaid'].includes(plan))fail(400,'INVALID_PLAN','Choose the A$1 starter pack or A$20 monthly plan.');
     const pk=pkOf(user),owner=randomUUID();await assertActive(pk);
     await retryConflict(async()=>{const row=await store.get(pk,'CHECKOUT_LOCK');if(row?.value.until>Date.now())fail(409,'CHECKOUT_PENDING','Checkout is already being prepared. Please retry in a moment.');await store.transact([change(pk,'CHECKOUT_LOCK',row,{owner,until:Date.now()+120000})]);});
     try{
       if(billing.reconcile)await billing.reconcile(user.sub,store);
       const entitlement=await getEntitlement(pk);
+      if(plan==='prepaid'&&(hasManagedSubscription(entitlement)||prepaidActive(entitlement)||(entitlement.prepaid?.reserved??0)>0))fail(409,'PAID_PERIOD_ACTIVE','Use your existing paid period before buying another one-time period.');
       if(plan==='monthly'&&hasManagedSubscription(entitlement))return billing.portal(user,store);
       if(plan==='starter'&&!billingView(entitlement).canPurchaseStarter)fail(409,'STARTER_NOT_ELIGIBLE','The starter pack is available only before a successful starter or subscription payment. Subscribe for A$20/month for 50 cover letters.');
       const cached=await store.get(pk,'CHECKOUT'),cachedPlan=cached?.value.plan??'monthly';let reusable=cachedPlan===plan&&cached?.value.expiresAt>Date.now()&&cached?.value.termsVersion===TERMS_VERSION;
@@ -1204,7 +1207,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
           ||checkout?.value.sessionId&&billingDeletion&&!checkoutVerified)fail(409,'CHECKOUT_PENDING','A checkout session is still open or changed during verification. Wait for its final result before deleting.');
         const e=entitlement?.value??blankEntitlement();
         if(hasManagedSubscription(e))fail(409,'CANCEL_SUBSCRIPTION_FIRST','Cancel your subscription and wait until it has ended before deleting your account.');
-        if((e.free?.reserved??0)+(e.starter?.reserved??0)+(e.paid?.reserved??0)>0)fail(409,'GENERATION_PENDING','Wait for pending cover-letter requests before deleting your account.');
+        if((e.free?.reserved??0)+(e.starter?.reserved??0)+(e.paid?.reserved??0)+(e.prepaid?.reserved??0)>0)fail(409,'GENERATION_PENDING','Wait for pending cover-letter requests before deleting your account.');
         await store.transact([
           change(pk,'DELETING',row,{startedAt:iso()}),
           change('ACCOUNT#deleted',deletedSk,null,{deleted:true}),

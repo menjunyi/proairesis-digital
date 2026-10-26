@@ -1,3 +1,4 @@
+import {findPrepaid,verifyPrepaid,prepaidMetadata,prepaidActive} from './prepaid-billing.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {change,retryConflict} from './store.mjs';
 import {blankEntitlement,hasManagedSubscription,HttpError,TERMS_VERSION} from './service.mjs';
@@ -224,7 +225,7 @@ export async function createBilling(env,dependencies={}){
   function validCheckoutOffer(session,plan,userSub,customerId){
     const priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;
     const offer=plan==='starter'?'starter-aud1-2-lifetime-v1':'monthly-aud20-50-v2',items=session.line_items?.data;
-    return session.mode===(plan==='starter'?'payment':'subscription')&&objectId(session.customer)===customerId
+    return session.mode===(plan==='monthly'?'subscription':'payment')&&objectId(session.customer)===customerId
       &&session.client_reference_id===userSub&&session.automatic_tax?.enabled===false
       &&session.metadata?.roleclue_user_id===userSub&&session.metadata?.roleclue_plan===plan
       &&session.metadata?.roleclue_price_id===priceId&&session.metadata?.roleclue_offer===offer
@@ -362,6 +363,7 @@ export async function createBilling(env,dependencies={}){
       }
     }
     const starterSnapshot=await findStarter(s,row.value,userSub,customerId);
+    const prepaidSnapshot=await findPrepaid(s,row.value,userSub,env.STRIPE_PRICE_ID,TERMS_VERSION);
     const subscriptionStatus=sub?.status??'none';
     const status=disputed?'disputed':refunded?'refunded':subscriptionStatus==='active'&&!monthlyPayment?'payment_pending':subscriptionStatus;
     await retryConflict(async()=>{
@@ -372,11 +374,13 @@ export async function createBilling(env,dependencies={}){
       const validPeriod=Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>0&&end>start;
       const key=sub&&validPeriod?`${sub.id}:${start}`:null;
       const paid=e.paid?.key===key?e.paid:{key,used:0,reserved:0};
+      const existingPrepaid=e.prepaid;
+      const prepaid=prepaidSnapshot?{...(existingPrepaid?.key===prepaidSnapshot.key?existingPrepaid:{used:0,reserved:0}),...prepaidSnapshot}:existingPrepaid;
       const existingStarter=e.starter??blankStarter();
       const starter=starterSnapshot
         ?{...existingStarter,key:starterSnapshot.sessionId,purchaseId:starterSnapshot.purchaseId,sessionId:starterSnapshot.sessionId,status:starterSnapshot.status,everPaid:true}
         :existingStarter.everPaid||existingStarter.purchaseId?existingStarter:blankStarter();
-      await store.transact([change(pk,'ENTITLEMENT',current,{...e,starter,paid,subscriptionEverPaid:e.subscriptionEverPaid===true||subscriptionEverPaid,status:status==='active'&&!validPeriod?'payment_pending':status,subscriptionStatus,subscriptionId:sub?.id??null,cancelAtPeriodEnd:sub?.cancel_at_period_end===true,periodStart:validPeriod?new Date(start*1000).toISOString():null,periodEnd:validPeriod?new Date(end*1000).toISOString():null})]);
+      await store.transact([change(pk,'ENTITLEMENT',current,{...e,starter,paid,...(prepaid?{prepaid}:{}),subscriptionEverPaid:e.subscriptionEverPaid===true||subscriptionEverPaid,status:status==='active'&&!validPeriod?'payment_pending':status,subscriptionStatus,subscriptionId:sub?.id??null,cancelAtPeriodEnd:sub?.cancel_at_period_end===true,periodStart:validPeriod?new Date(start*1000).toISOString():null,periodEnd:validPeriod?new Date(end*1000).toISOString():null})]);
     });
   }
   async function reconcile(userSub,store){
@@ -394,19 +398,25 @@ export async function createBilling(env,dependencies={}){
     if(checkout?.value.sessionId)ids.push(checkout.value.sessionId);
     const sessions=await listAll(params=>s.checkout.sessions.list(params),{customer:customerId});
     for(const session of sessions){
-      if(['starter','monthly'].includes(session.metadata?.roleclue_plan)&&session.metadata?.roleclue_user_id===user.sub&&!ids.includes(session.id))ids.push(session.id);
+      if(['starter','monthly','prepaid'].includes(session.metadata?.roleclue_plan)&&session.metadata?.roleclue_user_id===user.sub&&!ids.includes(session.id))ids.push(session.id);
     }
     let reconcileSuccessfulStarter=false;
     for(const id of ids){
       const session=await s.checkout.sessions.retrieve(id,{expand:['line_items.data.price','payment_intent.latest_charge']});
       const plan=session.metadata?.roleclue_plan;
-      const ownedRoleClueSession=['starter','monthly'].includes(plan)&&objectId(session.customer)===customerId
+      const ownedRoleClueSession=['starter','monthly','prepaid'].includes(plan)&&objectId(session.customer)===customerId
         &&session.client_reference_id===user.sub&&session.metadata?.roleclue_user_id===user.sub;
       if(!ownedRoleClueSession){
         if(id===checkout?.value.sessionId)throw unavailable('The current checkout could not be verified before account deletion.');
         continue;
       }
       if(session.status==='open')return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      if(plan==='prepaid'){
+        const intentId=objectId(session.payment_intent);const intent=intentId?await s.paymentIntents.retrieve(intentId):null;
+        if(intent?.status==='succeeded'){if(!(await verifyPrepaid(s,id,user.sub,customerId,env.STRIPE_PRICE_ID,TERMS_VERSION)))throw unavailable('The prepaid payment could not be verified before account deletion.');reconcileSuccessfulStarter=true;continue;}
+        if(session.status==='expired'&&!intent||['canceled','requires_payment_method'].includes(intent?.status)&&['complete','expired'].includes(session.status))continue;
+        return {pending:true,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
+      }
       if(plan==='starter'){
         const intentId=objectId(session.payment_intent),intent=intentId?await s.paymentIntents.retrieve(intentId,{expand:['latest_charge']}):null;
         if(intent?.status==='succeeded'){
@@ -433,12 +443,12 @@ export async function createBilling(env,dependencies={}){
     if(reconcileSuccessfulStarter)await reconcile(user.sub,store);
     return {pending:false,checkoutRevision:checkout?.revision??0,sessionId:checkout?.value.sessionId??null};
   }
-  return {async checkout(user,store,request={}){const s=await stripe(),pk=`USER#${user.sub}`,plan=request.plan??'monthly',priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;if(!['starter','monthly'].includes(plan))throw new HttpError(400,'INVALID_PLAN','Choose a valid billing plan.');const price=await s.prices.retrieve(priceId);const validMonthly=price.active&&price.currency==='aud'&&price.unit_amount===2000&&price.recurring?.interval==='month'&&price.recurring.interval_count===1&&(!price.recurring.usage_type||price.recurring.usage_type==='licensed');const validStarter=price.active&&price.currency==='aud'&&price.unit_amount===100&&!price.recurring;if(plan==='monthly'&&!validMonthly)throw unavailable('The A$20 monthly plan is not configured.');if(plan==='starter'&&!validStarter)throw unavailable('The A$1 starter pack is not configured.');let row=await store.get(pk,'ENTITLEMENT'),e=row?.value??blankEntitlement();if(plan==='monthly'&&hasManagedSubscription(e))return this.portal(user,store);if(plan==='starter'&&(e.starter?.everPaid||e.starter?.purchaseId||e.subscriptionEverPaid))throw new HttpError(409,'STARTER_NOT_ELIGIBLE','The starter pack is available only before a successful starter or subscription payment.');if(!e.customerId){const customer=await s.customers.create({email:user.email,metadata:{roleclue_user_id:user.sub}},{idempotencyKey:`roleclue-customer-${user.sub}`});await retryConflict(async()=>{row=await store.get(pk,'ENTITLEMENT');e=row?.value??blankEntitlement();const mapping=await store.get('BILLING#customers',customer.id);if(mapping&&mapping.value.userSub!==user.sub)throw Error('Customer ownership mismatch');await store.transact([change(pk,'ENTITLEMENT',row,{...e,customerId:customer.id}),change('BILLING#customers',customer.id,mapping,{userSub:user.sub})]);});e=await store.get(pk,'ENTITLEMENT').then(r=>r.value);}
+  return {async checkout(user,store,request={}){const s=await stripe(),pk=`USER#${user.sub}`,plan=request.plan??'monthly',priceId=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;if(!['starter','monthly','prepaid'].includes(plan))throw new HttpError(400,'INVALID_PLAN','Choose a valid billing plan.');const price=await s.prices.retrieve(priceId);const validMonthly=price.active&&price.currency==='aud'&&price.unit_amount===2000&&price.recurring?.interval==='month'&&price.recurring.interval_count===1&&(!price.recurring.usage_type||price.recurring.usage_type==='licensed');const validStarter=price.active&&price.currency==='aud'&&price.unit_amount===100&&!price.recurring;if(['monthly','prepaid'].includes(plan)&&!validMonthly)throw unavailable('The A$20 monthly plan is not configured.');if(plan==='starter'&&!validStarter)throw unavailable('The A$1 starter pack is not configured.');let row=await store.get(pk,'ENTITLEMENT'),e=row?.value??blankEntitlement();if(plan==='prepaid'&&(hasManagedSubscription(e)||prepaidActive(e)||(e.prepaid?.reserved??0)>0))throw new HttpError(409,'PAID_PERIOD_ACTIVE','Use your existing paid period before buying another one-time period.');if(plan==='monthly'&&hasManagedSubscription(e))return this.portal(user,store);if(plan==='starter'&&(e.starter?.everPaid||e.starter?.purchaseId||e.subscriptionEverPaid||e.prepaid?.everPaid))throw new HttpError(409,'STARTER_NOT_ELIGIBLE','The starter pack is available only before a successful starter or subscription payment.');if(!e.customerId){const customer=await s.customers.create({email:user.email,metadata:{roleclue_user_id:user.sub}},{idempotencyKey:`roleclue-customer-${user.sub}`});await retryConflict(async()=>{row=await store.get(pk,'ENTITLEMENT');e=row?.value??blankEntitlement();const mapping=await store.get('BILLING#customers',customer.id);if(mapping&&mapping.value.userSub!==user.sub)throw Error('Customer ownership mismatch');await store.transact([change(pk,'ENTITLEMENT',row,{...e,customerId:customer.id}),change('BILLING#customers',customer.id,mapping,{userSub:user.sub})]);});e=await store.get(pk,'ENTITLEMENT').then(r=>r.value);}
     const expiresAt=Math.floor((request.expiresAt??Date.now()+3600000)/1000);
-    const termsVersion=TERMS_VERSION,offer=plan==='starter'?'starter-aud1-2-lifetime-v1':'monthly-aud20-50-v2';
-    const metadata={roleclue_user_id:user.sub,roleclue_plan:plan,roleclue_price_id:priceId,roleclue_offer:offer,terms_accepted_at:request.acceptedAt??new Date().toISOString(),terms_version:termsVersion};
+    const termsVersion=TERMS_VERSION,offer=plan==='prepaid'?'prepaid-aud20-50-30days-v1':plan==='starter'?'starter-aud1-2-lifetime-v1':'monthly-aud20-50-v2';
+    const metadata={roleclue_user_id:user.sub,roleclue_plan:plan,roleclue_price_id:priceId,roleclue_offer:offer,terms_accepted_at:request.acceptedAt??new Date().toISOString(),terms_version:plan==='prepaid'?prepaidMetadata(user.sub,priceId,termsVersion).terms_version:termsVersion};
     const checkoutRequestKey=request.requestKey??randomUUID();
-    const session=await s.checkout.sessions.create({mode:plan==='starter'?'payment':'subscription',customer:e.customerId,expires_at:expiresAt,client_reference_id:user.sub,line_items:[{price:priceId,quantity:1}],automatic_tax:{enabled:false},...(plan==='starter'?{payment_intent_data:{metadata}}:{payment_method_collection:'always',subscription_data:{metadata}}),success_url:`${env.SITE_URL}/?checkout=success&plan=${plan}#account`,cancel_url:`${env.SITE_URL}/?checkout=cancelled#account`,allow_promotion_codes:false,consent_collection:{terms_of_service:'required'},metadata},{idempotencyKey:`roleclue-checkout-${STRIPE_CHECKOUT_CONTRACT}-${offer}-${checkoutRequestKey}`});
+    const session=await s.checkout.sessions.create({mode:plan==='monthly'?'subscription':'payment',customer:e.customerId,expires_at:expiresAt,client_reference_id:user.sub,line_items:plan==='prepaid'?[{price_data:{currency:'aud',unit_amount:2000,product_data:{name:'RoleClue Plus — 30 days, pay once',description:'50 successful cover letters for 30 days. One payment; no automatic renewal.',metadata:{roleclue_offer:'prepaid-aud20-50-30days-v1',roleclue_source_product:objectId(price.product)}},tax_behavior:'inclusive'},quantity:1}]:[{price:priceId,quantity:1}],automatic_tax:{enabled:false},...(plan!=='monthly'?{payment_intent_data:{metadata}}:{payment_method_collection:'always',subscription_data:{metadata}}),success_url:`${env.SITE_URL}/?checkout=success&plan=${plan}#account`,cancel_url:`${env.SITE_URL}/?checkout=cancelled#account`,allow_promotion_codes:false,consent_collection:{terms_of_service:'required'},metadata},{idempotencyKey:`roleclue-checkout-${STRIPE_CHECKOUT_CONTRACT}-${offer}-${checkoutRequestKey}`});
     if(session.automatic_tax?.enabled!==false){if(session.id)try{await s.checkout.sessions.expire(session.id);}catch{}throw unavailable('Checkout tax configuration could not be verified.');}
     return {url:session.url,sessionId:session.id,expiresAt:(session.expires_at??expiresAt)*1000};
   },
@@ -446,8 +456,18 @@ export async function createBilling(env,dependencies={}){
     const e=(await store.get(`USER#${user.sub}`,'ENTITLEMENT'))?.value;
     if(!e?.customerId)throw unavailable('Billing ownership could not be verified.');
     const s=await stripe(),session=await s.checkout.sessions.retrieve(sessionId,{expand:['line_items.data.price','payment_intent.latest_charge']});
-    const expectedMode=plan==='starter'?'payment':'subscription',expectedPrice=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;
+    const expectedMode=plan==='monthly'?'subscription':'payment',expectedPrice=plan==='starter'?env.STRIPE_STARTER_PRICE_ID:env.STRIPE_PRICE_ID;
     if(session.id!==sessionId||session.mode!==expectedMode||objectId(session.customer)!==e.customerId||session.client_reference_id!==user.sub)throw unavailable('Billing ownership could not be verified.');
+    if(plan==='prepaid'){
+      const expected=prepaidMetadata(user.sub,env.STRIPE_PRICE_ID,TERMS_VERSION);
+      const valid=Object.entries(expected).every(([k,v])=>session.metadata?.[k]===v);
+      if(!valid)throw unavailable('The prepaid checkout uses an outdated offer.');
+      if(session.status==='expired')return {status:'expired'};
+      if(session.status==='open')return {status:'open'};
+      const payment=await verifyPrepaid(s,sessionId,user.sub,e.customerId,env.STRIPE_PRICE_ID,TERMS_VERSION);
+      if(!payment)throw unavailable('Your one-time payment is still being verified.');
+      await reconcile(user.sub,store);return {status:'complete',ended:true,prepaidPurchased:true};
+    }
     const catalogMatches=session.automatic_tax?.enabled===false&&session.metadata?.roleclue_plan===plan&&session.metadata?.roleclue_price_id===expectedPrice&&session.metadata?.terms_version===TERMS_VERSION
       &&session.line_items?.data?.some(item=>objectId(item.price)===expectedPrice&&item.quantity===1);
     if(!catalogMatches&&session.status==='open'){

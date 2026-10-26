@@ -1828,10 +1828,18 @@ button svg {
   background: #f7f8ef;
 }
 .pricing-option > input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
   position: absolute;
   top: 19px;
   right: 19px;
   accent-color: #4f8264;
+}
+.pricing-option:has(input[value="prepaid"]) {
+  grid-column: 1 / -1;
 }
 .pricing-option:focus-within {
   outline: 2px solid var(--teal);
