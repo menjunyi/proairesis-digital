@@ -134,3 +134,14 @@ test('uncertain SQS redelivery remains failed for DLQ and emits the reconciliati
   assert.equal(logged.map(value=>JSON.parse(value).event).filter(event=>event==='generation_reconciliation_required').length,2);
   assert.equal((await store.get('USER#alice',`GEN#${id}`)).value.pendingReason,'PROVIDER_OUTCOME_UNKNOWN');
 });
+
+test('operator finalization retains private analytics context and queues outcome for normal read repair', async () => {
+  const {store} = await fixture();
+  const row = await store.get('USER#alice', `GEN#${id}`);
+  const context = {pk:'ANALYTICS#sessions#2026-10-30#direct',sk:'context',expiresAt:1};
+  await store.transact([change(row.pk,row.sk,row,{...row.value,analyticsContext:context})]);
+  const result = await reconcileGeneration({store,...target,...approval});
+  const saved = (await store.get(row.pk,row.sk)).value;
+  assert.deepEqual(saved.analyticsContext, context); assert.equal(saved.analyticsPending,true);
+  assert.doesNotMatch(JSON.stringify(result), /analyticsContext|ANALYTICS#/);
+});

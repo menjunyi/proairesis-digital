@@ -4374,3 +4374,12 @@ button svg {
     min-width: 44px;
   }
 }
+
+.analytics-choice { position: fixed; z-index: 90; right: 16px; bottom: 16px; max-width: min(440px, calc(100vw - 32px)); color: #062f3b; }
+.analytics-choice-panel { background: #fffdf5; border: 1px solid #9aafa2; border-radius: 12px; padding: 18px; box-shadow: 0 5px 24px #062f3b20; }
+.analytics-choice-panel p { font-size: 14px; line-height: 1.5; margin: 8px 0 14px; }
+.analytics-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.analytics-choice-actions .button { font-size: 14px; padding: 10px 14px; min-height: 44px; }
+.analytics-choice-open { background: #fffdf5; border: 1px solid #9aafa2; border-radius: 6px; padding: 8px 12px; min-height: 44px; font: inherit; font-size: 12px; cursor: pointer; }
+.analytics-withdrawal { padding: 10px; background: #fffdf5; border: 1px solid #9aafa2; font-size: 13px; }
+@media (max-width: 480px) { .analytics-choice { right: 12px; bottom: 12px; max-width: calc(100vw - 24px); } }

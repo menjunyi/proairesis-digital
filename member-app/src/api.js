@@ -1,4 +1,5 @@
 import { captureSessionGuard, getToken } from "./auth.js";
+import { analytics, track } from "./analytics.js";
 
 const MAX_COLLECTION_PAGES = 1000;
 const MAX_COLLECTION_BYTES = 128 * 1024 * 1024;
@@ -220,12 +221,26 @@ export async function loadConfig() {
   return config;
 }
 
+function measurementStage(path) {
+  if (path.includes('resume')) return 'resume';
+  if (path.includes('profile')) return 'profile';
+  if (path.includes('opportunit') || path.includes('search')) return 'matches';
+  if (path.includes('billing')) return 'checkout';
+  if (path.includes('letters') || path.includes('generation')) return 'generation';
+  if (path.includes('guest/start')) return 'onboarding';
+  return null;
+}
+function trackFailure(path) {
+  const stage = measurementStage(path);
+  if (stage) void track('flow_error', { stage, code: 'request_failed' });
+}
 export function createApi(config) {
   return async function api(
     path,
     { method = "GET", body, idempotencyKey } = {},
   ) {
     const token = await getToken(config);
+    const measurement = analytics?.headers() || {};
     let response, result;
     try {
       response = await fetch(
@@ -235,6 +250,7 @@ export function createApi(config) {
           signal: AbortSignal.timeout(45000),
           headers: {
             Authorization: `Bearer ${token}`,
+            ...measurement,
             Accept: "application/json",
             ...(body !== undefined
               ? { "Content-Type": "application/json" }
@@ -254,6 +270,7 @@ export function createApi(config) {
           : "Could not connect. Check your connection and try again.",
       );
       error.code = timedOut ? "REQUEST_TIMEOUT" : "NETWORK_ERROR";
+      trackFailure(path);
       throw error;
     }
     if (!response.ok) {
@@ -264,8 +281,15 @@ export function createApi(config) {
       error.code = result.error?.code;
       error.requestId = result.error?.requestId;
       error.status = response.status;
+      trackFailure(path);
       throw error;
     }
+    if (method === "PUT" && path === "/profile" && body?.confirmed === true) void track("profile_confirmed");
+    if (method === "POST" && path.endsWith("/decision") && body?.decision === "interested") void track("role_selected");
+    if (method === "POST" && ["/resume", "/resume/finalize"].includes(path)) void track("resume_completed");
+    if (method === "POST" && path === "/resume/upload") void track("resume_started");
+    if (method === "POST" && path === "/billing/checkout" && result.url?.startsWith("https://checkout.stripe.com/")) void track("checkout_started");
+    if (method === "POST" && path.endsWith('/letters')) void track("generation_requested");
     return { ...result, httpStatus: response.status };
   };
 }
@@ -296,6 +320,7 @@ export function createGuestApi(config) {
           : "Could not connect. Check your connection and try again.",
       );
       error.code = timedOut ? "REQUEST_TIMEOUT" : "NETWORK_ERROR";
+      trackFailure(path);
       throw error;
     }
     if (!response.ok) {
@@ -306,6 +331,7 @@ export function createGuestApi(config) {
       error.code = result?.error?.code;
       error.requestId = result?.error?.requestId;
       error.status = response.status;
+      trackFailure(path);
       throw error;
     }
     return { ...result, httpStatus: response.status };
