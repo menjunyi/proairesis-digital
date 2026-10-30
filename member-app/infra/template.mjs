@@ -202,13 +202,16 @@ export function appTemplate() {
     BatchSize: 1, MaximumBatchingWindowInSeconds: 0, FunctionResponseTypes: ['ReportBatchItemFailures'],
     ScalingConfig: { MaximumConcurrency: 2 },
   });
-  r.Api = resource('AWS::ApiGatewayV2::Api', { Name: 'roleclue-member-app', ProtocolType: 'HTTP', CorsConfiguration: { AllowOrigins: [sub('https://${Hostname}')], AllowHeaders: ['authorization', 'content-type', 'idempotency-key'], AllowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], MaxAge: 300 } });
+  r.Api = resource('AWS::ApiGatewayV2::Api', { Name: 'roleclue-member-app', ProtocolType: 'HTTP', CorsConfiguration: { AllowOrigins: [sub('https://${Hostname}')], AllowHeaders: ['authorization', 'content-type', 'idempotency-key', 'x-roleclue-analytics'], AllowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], MaxAge: 300 } });
   r.Integration = resource('AWS::ApiGatewayV2::Integration', { ApiId: ref('Api'), IntegrationType: 'AWS_PROXY', IntegrationUri: ref('FunctionAlias'), PayloadFormatVersion: '2.0', TimeoutInMillis: 29000 });
   r.Authorizer = resource('AWS::ApiGatewayV2::Authorizer', { ApiId: ref('Api'), AuthorizerType: 'JWT', Name: 'VerifiedCognitoIdentity', IdentitySource: ['$request.header.Authorization'], JwtConfiguration: { Audience: [ref('UserPoolClient')], Issuer: sub('https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}') } });
   r.PrivateRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'ANY /api/{proxy+}', Target: sub('integrations/${Integration}'), AuthorizationType: 'JWT', AuthorizerId: ref('Authorizer') });
   r.GuestClaimRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'POST /api/guest/claim', Target: sub('integrations/${Integration}'), AuthorizationType: 'JWT', AuthorizerId: ref('Authorizer') });
   r.ContinuationCompleteRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'POST /api/continuation/complete', Target: sub('integrations/${Integration}'), AuthorizationType: 'JWT', AuthorizerId: ref('Authorizer') });
   r.WebhookRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'POST /api/stripe/webhook', Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });
+  for (const [name, routeKey] of Object.entries({AnalyticsSessionRoute:'POST /api/analytics/session',AnalyticsEventsRoute:'POST /api/analytics/events',AnalyticsRevokeRoute:'POST /api/analytics/revoke',AppCampaignRedirectRoute:'GET /api/campaigns/r/{slug}'})) {
+    r[name] = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: routeKey, Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });
+  }
   r.HealthRoute = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: 'GET /api/health', Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });
   for (const [name, routeKey] of Object.entries({GuestStartRoute:'POST /api/guest/start',GuestResumeRoute:'POST /api/guest/resume',GuestProfileRoute:'PUT /api/guest/profile',GuestProfilePostRoute:'POST /api/guest/profile',GuestSearchRoute:'POST /api/guest/search',GuestSessionRoute:'POST /api/guest/session',GuestIgnoreRoute:'POST /api/guest/ignore'})) {
     r[name] = resource('AWS::ApiGatewayV2::Route', { ApiId: ref('Api'), RouteKey: routeKey, Target: sub('integrations/${Integration}'), AuthorizationType: 'NONE' });

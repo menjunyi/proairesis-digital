@@ -20,6 +20,8 @@ import {
   intakeSummary,
 } from "./intake.js";
 
+import { track } from "./analytics.js";
+
 const screens = ["Your goal", "Your search", "Your limits", "Anything else", "Review"];
 
 function AnswerButtons({ legend, value, options, onChange }) {
@@ -89,6 +91,7 @@ export default function CareerInterview({
   }, [screen]);
 
   const set = (key, value) => {
+    void track("onboarding_started");
     setDraft((current) => ({ ...current, [key]: value, interviewCompleted: false }));
     setLocalError("");
   };
@@ -124,6 +127,7 @@ export default function CareerInterview({
       return;
     }
     setLocalError("");
+    void track("onboarding_step", { step: screen + 1 });
     setScreen((current) => Math.min(4, current + 1));
   };
 
@@ -133,6 +137,7 @@ export default function CareerInterview({
       setLocalError(errors[0]);
       return;
     }
+    void track("onboarding_completed");
     onComplete?.({ ...createIntake(draft), interviewCompleted: true });
   };
 

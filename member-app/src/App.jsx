@@ -89,6 +89,7 @@ import {
   billingReturnPlan,
 } from "./billing-state";
 import GuestJourney from "./GuestJourney.jsx";
+import { analytics, track } from "./analytics.js";
 import {
   clearAccountBrowserState,
   clearContinuation,
@@ -420,7 +421,7 @@ export default function App() {
     [api, refreshMe],
   );
   useEffect(() => {
-    void loadConfig().then(setConfig).catch(setConfigError);
+    void loadConfig().then(value => { analytics.configure(value); setConfig(value); }).catch(setConfigError);
   }, []);
   useEffect(() => {
     const authQuery = new URLSearchParams(window.location.search);
@@ -1510,12 +1511,19 @@ export function AuthScreen({
     setMessage("");
     try {
       const address = email.trim().toLowerCase();
-      if (mode === "signin") onSession(await signIn(config, address, password));
+      if (mode === "signin") {
+        const next = await signIn(config, address, password);
+        // Measurement is optional and cannot block sign-in.
+        const measurement = analytics.headers();
+        if (measurement["X-RoleClue-Analytics"]) void createApi(config)("/analytics/signup-confirmed", { method: "POST", body: { token: measurement["X-RoleClue-Analytics"] } }).catch(() => {});
+        onSession(next);
+      }
       if (mode === "signup") {
         if (!continuation && !terms)
           throw new Error(
             "Please accept the terms and privacy notice to create your account.",
           );
+        void track("signup_started");
         const result = await signUp(config, address, password, name.trim());
         setMode(result.UserConfirmed ? "signin" : "confirm");
         setPassword("");
@@ -2573,6 +2581,7 @@ export function OpportunitiesScreen({
         assertSession();
         if (isCurrent()) {
           setData(result);
+          if (requestedView === "selected") void track(result.opportunities?.length ? "matches_shown" : "matches_empty");
           if (requestedView === "selected" && capabilities.recommendations)
             selectedLoaded.current = true;
         }
@@ -2814,7 +2823,7 @@ export function OpportunitiesScreen({
             <button
               className="opportunity-row"
               key={match.job.id}
-              onClick={() => setSelected(match)}
+              onClick={() => { void track("role_opened"); setSelected(match); }}
             >
               <span className={`company-monogram tone-${index % 4}`}>
                 {match.job.company?.slice(0, 1).toUpperCase() || "R"}

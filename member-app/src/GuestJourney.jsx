@@ -1,3 +1,4 @@
+import { track } from "./analytics.js";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ProcessedJobDescription from "./ProcessedJobDescription.jsx";
 import {
@@ -507,7 +508,7 @@ function MatchesStep({ data, busy, error, onIgnore, onInterested, onRestart }) {
                   {closing ? ` Closing date ${closing}.` : " The employer listing is authoritative; availability can change."}
                 </p>
                 <div className="guest-match-actions">
-                  <button className="button secondary" aria-expanded={open} onClick={() => setOpenId(open ? null : job.id)}>{open ? "Hide details" : "View match details"}</button>
+                  <button className="button secondary" aria-expanded={open} onClick={() => { if (!open) void track("role_opened"); setOpenId(open ? null : job.id); }}>{open ? "Hide details" : "View match details"}</button>
                   <button className="button" disabled={busy === job.id} onClick={() => onInterested(match)}>{busy === job.id ? <><LoaderCircle className="spin" size={17} /> Saving</> : <><Heart size={17} /> Interested</>}</button>
                   <button className="text-link" disabled={Boolean(busy)} onClick={() => onIgnore(match)}>Ignore</button>
                 </div>
@@ -654,6 +655,7 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
     const extension = file?.name?.split(".").pop()?.toLowerCase();
     if (!file || !["pdf", "docx"].includes(extension)) return setError(new Error("Choose a PDF or DOCX resume."));
     if (!file.size || file.size > GUEST_RESUME_MAX_BYTES) return setError(new Error("Choose a non-empty resume no larger than 4 MB."));
+    void track("resume_started");
     setBusy("upload");
     setError(null);
     try {
@@ -669,6 +671,7 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
       });
       const nextBundle = result.guest || { ...bundle, profile: result.profile };
       setBundle(nextBundle);
+      void track("resume_completed");
       persist("review", result);
     } catch (failure) {
       setError(failure);
@@ -684,10 +687,12 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
       const result = await guestApi("/guest/profile", { token: session.token, profile, termsAccepted: true, reviewed: true });
       const nextBundle = result.guest || { ...bundle, profile: result.profile || profile };
       setBundle(nextBundle);
+      void track("profile_confirmed");
       persist("searching", result);
       setBusy("search");
       const searchResult = await guestApi("/guest/search", { token: session.token });
       setBundle(searchResult.guest || { ...nextBundle, ...searchResult });
+      void track((searchResult.guest?.opportunities || searchResult.opportunities || []).length ? "matches_shown" : "matches_empty");
       persist("matches", searchResult);
     } catch (failure) {
       setError(failure);
@@ -712,6 +717,7 @@ export default function GuestJourney({ config, onContinueAuth, onSignIn }) {
   }
 
   function interested(match) {
+    void track("role_selected");
     saveContinuation({ token: session.token, jobId: match.job.id, awaitingAuth: true, claimed: false });
     onContinueAuth({ token: session.token, jobId: match.job.id });
   }

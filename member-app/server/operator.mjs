@@ -147,6 +147,7 @@ export async function reconcileGeneration({
     const letter = text ? {id: generationId, text, createdAt: timestamp, editedAt: null} : null;
     const updated = {
       ...safeGeneration,
+      ...(g.analyticsContext ? { analyticsContext: g.analyticsContext, analyticsPending: true } : {}),
       status: resolution,
       completedAt: timestamp,
       operatorReconciledAt: timestamp,

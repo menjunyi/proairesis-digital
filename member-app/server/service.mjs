@@ -202,6 +202,8 @@ function cleanProfile(input,existing,email){
 }
 function publicGeneration(value){
   const {
+    analyticsContext:_analyticsContext,
+    analyticsPending:_analyticsPending,
     profileSnapshot:_profileSnapshot,
     jobSnapshot:_jobSnapshot,
     lease:_lease,
@@ -227,7 +229,7 @@ function publicApplication(value){
   return application;
 }
 
-export function createService({store,mode='production',provider,dispatch,files,billing,feed,identity,guestSearch,guestRateSecret,requireAiConsent=false,extract=extractResume}) {
+export function createService({store,mode='production',provider,dispatch,files,billing,feed,identity,guestSearch,guestRateSecret,analytics,requireAiConsent=false,extract=extractResume}) {
   const demo=mode==='demo';
   const underlying=store;
   store={get:underlying.get.bind(underlying),list:underlying.list.bind(underlying),listPage:underlying.listPage?.bind(underlying),scanPage:underlying.scanPage?.bind(underlying),removePartition:underlying.removePartition.bind(underlying),transact:changes=>{const guarded=[...new Set(changes.filter(c=>c.pk.startsWith('USER#')).map(c=>c.pk))].filter(pk=>!changes.some(c=>c.pk===pk&&c.sk==='DELETING'));return underlying.transact([...changes,...guarded.flatMap(pk=>[{pk,sk:'DELETING',expected:0,checkOnly:true},{pk:'ACCOUNT#deleted',sk:tombstoneKey(pk.slice(5)),expected:0,checkOnly:true}])]);}};
@@ -1050,7 +1052,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
         fail(402,view.reason,message);
       }
       const bucket=view.plan==='monthly'?'paid':view.plan==='prepaid'?'prepaid':'starter';e[bucket]??={key:null,purchaseId:null,status:'none',used:0,reserved:0};e[bucket].reserved++;
-      const generation={id,appId,status:'pending',createdAt:iso(),bucket,periodKey:e[bucket].key??'lifetime',profileSnapshot:profile.value,jobSnapshot:app.value.job,...(input.aiProcessingConfirmed===true?{aiConsentAt:iso(),aiConsentVersion:'roleclue-ai-2026-10-12'}:{})};
+      const generation={...(user.analyticsContext?{analyticsContext:user.analyticsContext}:{}),id,appId,status:'pending',createdAt:iso(),bucket,periodKey:e[bucket].key??'lifetime',profileSnapshot:profile.value,jobSnapshot:app.value.job,...(input.aiProcessingConfirmed===true?{aiConsentAt:iso(),aiConsentVersion:'roleclue-ai-2026-10-12'}:{})};
       const registry=await store.get(GENERATION_OUTBOX_PK,outboxSk);
       if(registry&&!validGenerationRegistration(registry))throw Error('Pending generation registry conflict');
       const registration=registry
@@ -1063,7 +1065,8 @@ export function createService({store,mode='production',provider,dispatch,files,b
     if(result.created){if(dispatch)await scheduleGeneration(user.sub,resultId);else try{await runGeneration(user.sub,resultId);}catch(error){if(!error.uncertain)throw error;}}
     return generationResult(user,resultId);
   }
-  async function generationResult(user,id){const pk=pkOf(user);await assertActive(pk);let row=await store.get(pk,`GEN#${id}`);if(!row)fail(404,'NOT_FOUND','Generation not found.');if(row.value.status==='pending')await ensureGenerationRegistration(user.sub,id,row.value.createdAt);if(dispatch&&row.value.status==='pending'&&!row.value.providerStartedAt&&!row.value.dispatchedAt&&!futureIso(row.value.dispatchLeaseUntil)){await scheduleGeneration(user.sub,id);row=await store.get(pk,`GEN#${id}`);}return {generation:publicGeneration(row.value),billing:billingView(await getEntitlement(pk))};}
+  async function recordGenerationOutcome(sub,id){if(!analytics)return;try{const pk=`USER#${sub}`,sk=`GEN#${id}`,row=await store.get(pk,sk);if(!row?.value.analyticsPending||!row.value.analyticsContext||!['succeeded','failed'].includes(row.value.status))return;await analytics.outcome(row.value.analyticsContext,row.value.status==='succeeded'?'letter_succeeded':'letter_failed',id);await retryConflict(async()=>{const current=await store.get(pk,sk);if(current?.value.analyticsPending)await store.transact([change(pk,sk,current,{...current.value,analyticsPending:false})]);});}catch{console.error(JSON.stringify({event:'analytics_generation_pending'}));}}
+  async function generationResult(user,id){const pk=pkOf(user);await assertActive(pk);let row=await store.get(pk,`GEN#${id}`);if(!row)fail(404,'NOT_FOUND','Generation not found.');if(row.value.status==='pending')await ensureGenerationRegistration(user.sub,id,row.value.createdAt);if(dispatch&&row.value.status==='pending'&&!row.value.providerStartedAt&&!row.value.dispatchedAt&&!futureIso(row.value.dispatchLeaseUntil)){await scheduleGeneration(user.sub,id);row=await store.get(pk,`GEN#${id}`);}await recordGenerationOutcome(user.sub,id);return {generation:publicGeneration(row.value),billing:billingView(await getEntitlement(pk))};}
   async function finishGeneration(sub,id,text,message){
     const pk=`USER#${sub}`,outboxSk=generationOutboxKey(sub,id);return retryConflict(async()=>{const [row,registry]=await Promise.all([store.get(pk,`GEN#${id}`),store.get(GENERATION_OUTBOX_PK,outboxSk)]);
       if(registry&&!validGenerationRegistration(registry))throw Error('Pending generation registry conflict');
@@ -1073,17 +1076,17 @@ export function createService({store,mode='production',provider,dispatch,files,b
       const acceptedText=text&&!accessRevoked?text:null;
       if(bucketMatches){bucket.reserved=Math.max(0,bucket.reserved-1);if(acceptedText)bucket.used++;}
       const safe=publicGeneration(g),letter=acceptedText?{id,text:acceptedText,createdAt:iso(),editedAt:null}:undefined;
-      const generation={...safe,status:acceptedText?'succeeded':'failed',completedAt:iso(),...(letter?{letter}:{error:accessRevoked?'Your paid allowance was revoked before this letter completed. No generation was consumed.':message??'Generation failed. Your allowance was restored.'})};
+      const generation={...safe,...(g.analyticsContext?{analyticsContext:g.analyticsContext,analyticsPending:true}:{}),status:acceptedText?'succeeded':'failed',completedAt:iso(),...(letter?{letter}:{error:accessRevoked?'Your paid allowance was revoked before this letter completed. No generation was consumed.':message??'Generation failed. Your allowance was restored.'})};
       const changes=[change(pk,'ENTITLEMENT',eRow,e),change(pk,`GEN#${id}`,row,generation)];
       if(letter)changes.push(change(pk,`LETTER#${g.appId}#${id}`,null,letter));
       if(appRow?.value.pendingGenerationId===id){const application={...appRow.value};delete application.pendingGenerationId;changes.push(change(pk,`APP#${g.appId}`,appRow,application));}
       if(registry)changes.push({pk:registry.pk,sk:registry.sk,expected:registry.revision,remove:true});
       await store.transact(changes);
-    });
+    }).then(async result=>{await recordGenerationOutcome(sub,id);return result;});
   }
   async function runGeneration(sub,id){
     const pk=`USER#${sub}`;if(await store.get(pk,'DELETING'))return;
-    const initial=await store.get(pk,`GEN#${id}`);if(initial?.value.status==='pending')await ensureGenerationRegistration(sub,id,initial.value.createdAt);
+    const initial=await store.get(pk,`GEN#${id}`);if(initial&&initial.value.status!=='pending'){await recordGenerationOutcome(sub,id);return;}if(initial?.value.status==='pending')await ensureGenerationRegistration(sub,id,initial.value.createdAt);
     const leaseId=randomUUID(),lease=iso(),leaseExpiresAt=new Date(Date.now()+WORKER_LEASE_MS).toISOString();
     const claimed=await retryConflict(async()=>{
       const row=await store.get(pk,`GEN#${id}`);if(!row||row.value.status!=='pending')return null;
@@ -1128,7 +1131,7 @@ export function createService({store,mode='production',provider,dispatch,files,b
         if(!cached.value.sessionId||!billing.checkoutState)fail(503,'SERVICE_UNAVAILABLE','The previous checkout could not be verified. Contact support before starting another subscription.');
         const state=await billing.checkoutState(user,store,cached.value.sessionId,cachedPlan);
         if(state.status==='open'&&cachedPlan!==plan)fail(409,'CHECKOUT_PENDING','Finish or cancel the open checkout before choosing another plan.');
-        if(state.status==='open'&&cached.value.url)return {url:cached.value.url};
+        if(state.status==='open'&&cached.value.url){if(analytics&&cached.value.analyticsContext)try{await analytics.bindCheckout(user.sub,cached.value.sessionId,cachedPlan,cached.value.analyticsContext);}catch{console.error(JSON.stringify({event:'analytics_checkout_unavailable'}));}return {url:cached.value.url};}
         if(!['complete','expired'].includes(state.status))fail(503,'SERVICE_UNAVAILABLE','The previous checkout is still being checked. Try again shortly.');
         if(!billing.reconcile)fail(503,'SERVICE_UNAVAILABLE','The previous subscription could not be verified.');
         await billing.reconcile(user.sub,store);
@@ -1138,10 +1141,11 @@ export function createService({store,mode='production',provider,dispatch,files,b
         if(state.status==='complete'&&state.ended!==true)fail(503,'SERVICE_UNAVAILABLE','The completed checkout has not confirmed its payment. Refresh billing or contact support.');
         reusable=false;
       }
-      const request=reusable?cached.value:{plan,requestKey:randomUUID(),expiresAt:Date.now()+3600000,acceptedAt:iso(),termsVersion:TERMS_VERSION};
+      const request=reusable?cached.value:{plan,requestKey:randomUUID(),expiresAt:Date.now()+3600000,acceptedAt:iso(),termsVersion:TERMS_VERSION,...(user.analyticsContext?{analyticsContext:user.analyticsContext}:{})};
       await store.transact([change(pk,'CHECKOUT',cached,request)]);
       const result=await billing.checkout(user,store,request);
       await retryConflict(async()=>{const row=await store.get(pk,'CHECKOUT');await store.transact([change(pk,'CHECKOUT',row,{...request,url:result.url,...(result.sessionId?{sessionId:result.sessionId}:{}),expiresAt:result.expiresAt??request.expiresAt})]);});
+      if(analytics&&result.sessionId)try{await analytics.bindCheckout(user.sub,result.sessionId,plan,request.analyticsContext);}catch{console.error(JSON.stringify({event:'analytics_checkout_unavailable'}));}
       return {url:result.url};
     }finally{const row=await store.get(pk,'CHECKOUT_LOCK');if(row?.value.owner===owner)await store.transact([{pk,sk:'CHECKOUT_LOCK',expected:row.revision,remove:true}]);}
   }
