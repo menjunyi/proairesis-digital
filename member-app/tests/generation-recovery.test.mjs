@@ -77,3 +77,16 @@ test('a deployed pending generation without an application pointer is recovered 
   assert.equal((await store.get('USER#alice','ENTITLEMENT')).value.starter.reserved,1);
   assert.equal((await store.get('USER#alice','APP#job-one')).value.pendingGenerationId,generationId);
 });
+
+test('analytics retains original generation context through async persistence, fail-open retry, and public export',async()=>{
+ const {createAnalytics}=await import('../server/analytics.mjs');const {store}=await fixture(),analytics=createAnalytics({store,secret:'synthetic-key'}),a=await analytics.session({consent:true,visitor:randomUUID(),session:randomUUID()}),b=await analytics.session({consent:true,visitor:randomUUID(),session:randomUUID()}),ca=await analytics.context(a.token),cb=await analytics.context(b.token);
+ let outage=true;const tracking={...analytics,outcome:async(...args)=>{if(outage)throw Error('synthetic analytics outage');return analytics.outcome(...args);}};
+ const service=createService({store,analytics:tracking,feed:{status:async()=>({}),jobs:async()=>[]},provider:{available:async()=>true,generate:async()=>letter},dispatch:async()=>{}});
+ const pending=await service.generate({...alice,analyticsContext:ca},job.id,randomUUID());assert.equal(pending.generation.analyticsContext,undefined);
+ const reused=await service.generate({...alice,analyticsContext:cb},job.id,randomUUID());assert.equal(reused.generation.id,pending.generation.id);
+ const oldError=console.error;console.error=()=>{};try{await service.runGeneration(alice.sub,pending.generation.id);}finally{console.error=oldError;}
+ const persisted=await store.get('USER#alice',`GEN#${pending.generation.id}`);assert.equal(persisted.value.status,'succeeded');assert.equal(persisted.value.analyticsPending,true);assert.deepEqual(persisted.value.analyticsContext,ca);
+ outage=false;const result=await service.generationResult(alice,pending.generation.id);assert.equal(result.generation.status,'succeeded');assert.equal(result.generation.analyticsContext,undefined);assert.equal(result.generation.analyticsPending,undefined);
+ const exported=await service.exportAccount(alice);assert.ok(!JSON.stringify(exported).includes('analyticsContext'));assert.ok(!JSON.stringify(exported).includes('ANALYTICS#sessions'));
+ const original=await store.get(ca.pk,ca.sk),other=await store.get(cb.pk,cb.sk);assert.ok(original.value.stages.letter_succeeded);assert.equal(other.value.stages.letter_succeeded,undefined);assert.equal((await store.get('USER#alice','ENTITLEMENT')).value.starter.used,1);
+});

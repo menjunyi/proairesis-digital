@@ -4,6 +4,7 @@ import {DynamoStore,RecordSizeError} from './store.mjs';
 import {createService,HttpError} from './service.mjs';
 import {ResumeError} from './resume.mjs';
 import {createBilling,createFeed,createFiles,createProvider,secret} from './adapters.mjs';
+import {createAnalytics,isDirectAnalyticsAdmin} from './analytics.mjs';
 import {createFreehireSearch} from './freehire.mjs';
 
 const secretMatches=(expected,actual)=>{
@@ -109,7 +110,7 @@ export function processAiAuthorityReview(log=console.log){
   return {ok:true};
 }
 
-export function createHttpHandler(service,{mode='production',origins=[],originSecret}={}) {
+export function createHttpHandler(service,{mode='production',origins=[],originSecret,analytics}={}) {
   return async function http(event){
     const requestId=randomUUID(),headers={'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Request-ID':requestId};
     const incoming=Object.fromEntries(Object.entries(event.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
@@ -120,12 +121,16 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
     try{
       if(!secretMatches(originSecret,incoming['x-roleclue-origin']))throw new HttpError(403,'INVALID_ORIGIN','This API origin is not allowed.');
       if(origin&&!origins.includes(origin))throw new HttpError(403,'INVALID_ORIGIN','This origin is not allowed.');
-      if(method==='OPTIONS'){headers['Access-Control-Allow-Methods']='GET,POST,PUT,PATCH,DELETE,OPTIONS';headers['Access-Control-Allow-Headers']='Authorization,Content-Type,Idempotency-Key';return reply(204,{});}
+      if(method==='OPTIONS'){headers['Access-Control-Allow-Methods']='GET,POST,PUT,PATCH,DELETE,OPTIONS';headers['Access-Control-Allow-Headers']='Authorization,Content-Type,Idempotency-Key,X-RoleClue-Analytics';return reply(204,{});}
       if(path==='/api/health'&&method==='GET')return reply(200,{ok:true,mode});
       const raw=event.isBase64Encoded?Buffer.from(event.body??'','base64').toString('utf8'):event.body??'';
       if(Buffer.byteLength(raw)>7*1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','Request too large.');
       if(path==='/api/stripe/webhook'&&method==='POST'){if(Buffer.byteLength(raw)>1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','Request too large.');return reply(200,await service.webhook(raw,incoming['stripe-signature']));}
+      if(analytics&&path.startsWith('/api/campaigns/r/')&&method==='GET'){const query=new URLSearchParams(event.rawQueryString??new URLSearchParams(event.queryStringParameters??{}).toString());const location=await analytics.redirect(path.slice('/api/campaigns/r/'.length),{test:query.get('rc_test')==='1',bot:/bot|crawler|spider|preview|facebookexternalhit|linkedinbot|headless/i.test(incoming['user-agent']??'')});return {statusCode:302,headers:{...headers,Location:location},body:''};}
+      if(path.startsWith('/api/analytics/')&&Buffer.byteLength(raw)>4096)throw new HttpError(413,'PAYLOAD_TOO_LARGE','Analytics request too large.');
       let body={};if(raw){try{body=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{throw new HttpError(400,'INVALID_JSON','Send a valid JSON object.');}}
+      if(analytics&&path.startsWith('/api/analytics/')&&(event.rawQueryString||Object.keys(event.queryStringParameters??{}).length))throw new HttpError(400,'INVALID_QUERY','Send analytics context in the request body.');
+      if(analytics&&method==='POST'){if(path==='/api/analytics/session')return reply(200,await analytics.session(body,guestSourceIp(event,incoming,originSecret)));if(path==='/api/analytics/events')return reply(200,await analytics.events(body));if(path==='/api/analytics/revoke')return reply(200,await analytics.revoke(body));}
       if(path.startsWith('/api/guest/')&&(event.rawQueryString||Object.keys(event.queryStringParameters??{}).length))throw new HttpError(400,'INVALID_QUERY','Guest tokens and content must be sent in the request body, not the URL.');
       const sourceIp=path.startsWith('/api/guest/')?guestSourceIp(event,incoming,originSecret):'';
       if(path==='/api/guest/start'&&method==='POST')return reply(200,await service.startGuest(body,sourceIp));
@@ -138,6 +143,7 @@ export function createHttpHandler(service,{mode='production',origins=[],originSe
       if(mode==='demo'){if(incoming.authorization!=='Bearer demo')throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in to continue.');user={sub:'demo-user',email:'demo@example.test',name:'Alex Example',identityUsername:'demo-user',authTime:Math.floor(Date.now()/1000)};}
       else{const claims=event.requestContext?.authorizer?.jwt?.claims,identityUsername=claims?.['cognito:username'];if(!claims?.sub||!claims.email||!(claims.email_verified===true||claims.email_verified==='true')||claims.token_use!=='id'||identityUsername!==undefined&&(typeof identityUsername!=='string'||!identityUsername||identityUsername.length>128||/[\u0000-\u001f\u007f]/.test(identityUsername)))throw new HttpError(401,'SIGN_IN_REQUIRED','Sign in with a verified email to continue.');user={sub:claims.sub,email:claims.email,name:typeof claims.name==='string'?claims.name:'',identityUsername:identityUsername??claims.sub,authTime:authTimeFromClaim(claims.auth_time)};}
       if(!(path==='/api/account'&&method==='DELETE'))await service.assertActive(user);
+      if(analytics){user.analyticsContext=await analytics.context(incoming['x-roleclue-analytics']);if(path==='/api/analytics/signup-confirmed'&&method==='POST')return reply(200,await analytics.signup(user,body));}
       const cursor=()=>{
         const query=new URLSearchParams(event.rawQueryString??'');
         if(query.getAll('cursor').length>1)throw new HttpError(400,'INVALID_CURSOR','Send one page cursor.');
@@ -184,15 +190,16 @@ async function productionRuntime(){
   const env=process.env;
   if(env.ROLECLUE_LOCAL_DEMO==='1')throw Error('Demo mode is forbidden in the Lambda handler');
   if(!env.TABLE_NAME||!env.RESUME_BUCKET||!env.GENERATION_QUEUE_URL||!env.RECOMMENDATION_QUEUE_URL)throw Error('Production storage and work queues are required');
-  const store=await DynamoStore.create(env.TABLE_NAME),feed=createFeed(store,env),files=await createFiles(env.RESUME_BUCKET),billing=await createBilling(env),guestSearch=createFreehireSearch(env);
+  const store=await DynamoStore.create(env.TABLE_NAME),analytics=createAnalytics({store,secret:()=>secret(env.GUEST_RATE_HASH_SECRET_PARAM),siteUrl:env.SITE_URL}),feed=createFeed(store,env),files=await createFiles(env.RESUME_BUCKET),billing=await createBilling(env,{analytics}),guestSearch=createFreehireSearch(env);
   const {SQSClient,SendMessageCommand}=await import('@aws-sdk/client-sqs');const sqs=new SQSClient({});
   const identity={async remove(username){const {CognitoIdentityProviderClient,AdminDeleteUserCommand}=await import('@aws-sdk/client-cognito-identity-provider');try{await new CognitoIdentityProviderClient({}).send(new AdminDeleteUserCommand({UserPoolId:env.COGNITO_USER_POOL_ID,Username:username}));}catch(e){if(e.name!=='UserNotFoundException')throw e;}}};
-  const service=createService({store,feed,files,billing,identity,guestSearch,guestRateSecret:()=>secret(env.GUEST_RATE_HASH_SECRET_PARAM),requireAiConsent:true,provider:createProvider(store,env),dispatch:async payload=>{const queueUrl=workQueueUrl(payload,env),fifo=queueUrl.endsWith('.fifo'),deduplicationId=payload.kind==='generate'?payload.generationId:createHash('sha256').update(`${payload.kind}:${payload.userSub??payload.cursor??payload.after}:${new Date().toISOString().slice(0,10)}`).digest('hex'),response=await sqs.send(new SendMessageCommand({QueueUrl:queueUrl,MessageBody:JSON.stringify(payload),...(fifo?{MessageGroupId:payload.kind,MessageDeduplicationId:deduplicationId}:{})}));if(!response.MessageId)throw Error('Work message not accepted');}});
-  runtime={service,feed,http:createHttpHandler(service,{origins:(env.ALLOWED_ORIGINS??env.SITE_URL??'').split(',').filter(Boolean),originSecret:env.API_ORIGIN_SECRET})};return runtime;
+  const service=createService({store,feed,files,billing,identity,guestSearch,analytics,guestRateSecret:()=>secret(env.GUEST_RATE_HASH_SECRET_PARAM),requireAiConsent:true,provider:createProvider(store,env),dispatch:async payload=>{const queueUrl=workQueueUrl(payload,env),fifo=queueUrl.endsWith('.fifo'),deduplicationId=payload.kind==='generate'?payload.generationId:createHash('sha256').update(`${payload.kind}:${payload.userSub??payload.cursor??payload.after}:${new Date().toISOString().slice(0,10)}`).digest('hex'),response=await sqs.send(new SendMessageCommand({QueueUrl:queueUrl,MessageBody:JSON.stringify(payload),...(fifo?{MessageGroupId:payload.kind,MessageDeduplicationId:deduplicationId}:{})}));if(!response.MessageId)throw Error('Work message not accepted');}});
+  runtime={service,feed,analytics,http:createHttpHandler(service,{origins:(env.ALLOWED_ORIGINS??env.SITE_URL??'').split(',').filter(Boolean),originSecret:env.API_ORIGIN_SECRET,analytics})};return runtime;
 }
 export async function handler(event){
   if(event?.kind==='ai-authority-review')return processAiAuthorityReview();
   const r=await productionRuntime();
+  if(isDirectAnalyticsAdmin(event))return r.analytics.admin(event);
   if(Array.isArray(event.Records)&&event.Records.some(record=>record.eventSource==='aws:sqs'))return processGenerationBatch(r.service,event);
   if(event?.kind==='generate'){
     if(Object.keys(event).sort().join(',')!=='generationId,kind,userSub'||typeof event.userSub!=='string'||event.userSub.length<1||event.userSub.length>160||/[\u0000-\u001f\u007f]/.test(event.userSub)||typeof event.generationId!=='string'||!/^[a-f0-9]{64}$/.test(event.generationId))throw Error('Invalid generation event');

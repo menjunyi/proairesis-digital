@@ -6,7 +6,7 @@ test('production is authenticated by default, with only bounded guest intake, he
   const routes = Object.values(appTemplate().Resources).filter(r => r.Type === 'AWS::ApiGatewayV2::Route');
   assert.equal(routes.find(r => r.Properties.RouteKey === 'ANY /api/{proxy+}').Properties.AuthorizationType, 'JWT');
   const compareRouteKeys = (left, right) => left.localeCompare(right);
-  assert.deepEqual(routes.filter(r => r.Properties.AuthorizationType === 'NONE').map(r => r.Properties.RouteKey).sort(compareRouteKeys), ['GET /api/health','POST /api/guest/ignore','POST /api/guest/profile','POST /api/guest/resume','POST /api/guest/search','POST /api/guest/session','POST /api/guest/start','POST /api/stripe/webhook','PUT /api/guest/profile'].sort(compareRouteKeys));
+  assert.deepEqual(routes.filter(r => r.Properties.AuthorizationType === 'NONE').map(r => r.Properties.RouteKey).sort(compareRouteKeys), ['GET /api/campaigns/r/{slug}', 'GET /api/health', 'POST /api/analytics/events', 'POST /api/analytics/revoke', 'POST /api/analytics/session','POST /api/guest/ignore','POST /api/guest/profile','POST /api/guest/resume','POST /api/guest/search','POST /api/guest/session','POST /api/guest/start','POST /api/stripe/webhook','PUT /api/guest/profile'].sort(compareRouteKeys));
   assert.equal(routes.find(r => r.Properties.RouteKey === 'POST /api/guest/claim').Properties.AuthorizationType,'JWT');
   assert.equal(routes.find(r => r.Properties.RouteKey === 'POST /api/continuation/complete').Properties.AuthorizationType,'JWT');
 });
