@@ -19,7 +19,7 @@ test('analytics counts only canonically paid originating prepaid checkout, dedup
  const {createAnalytics}=await import('../server/analytics.mjs'),{randomUUID}=await import('node:crypto');const f=fixture(),store=new MemoryStore();
  await store.transact([change('USER#alice','ENTITLEMENT',null,{...blankEntitlement(),customerId:'cus_alice'})]);
  f.client.subscriptions={list:async()=>({data:[],has_more:false})};f.client.checkout.sessions.list=async()=>({data:[{id:'cs_once',metadata:{roleclue_plan:'prepaid'}}],has_more:false});
- const analytics=createAnalytics({store,secret:'synthetic-key'}),issued=await analytics.session({consent:true,visitor:randomUUID(),session:randomUUID()}),context=await analytics.context(issued.token);
+ const analytics=createAnalytics({store,secret:'synthetic-key'}),issued=await analytics.session({enabled:true,visitor:randomUUID(),session:randomUUID()}),context=await analytics.context(issued.token);
  await analytics.bindCheckout('alice','cs_once','prepaid',context);
  const billing=await createBilling({STRIPE_SECRET_KEY_PARAM:'test',STRIPE_WEBHOOK_SECRET_PARAM:'test',STRIPE_PRICE_ID:'price_month',STRIPE_STARTER_PRICE_ID:'price_starter',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_test'},{client:f.client,analytics});
  f.session.payment_status='unpaid';await billing.reconcile('alice',store);let report=await analytics.admin({adminAction:'report'});assert.equal(report.campaigns[0].funnel.stages.find(s=>s.kind==='payment_confirmed').sessions,0);

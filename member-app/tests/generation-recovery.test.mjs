@@ -79,7 +79,7 @@ test('a deployed pending generation without an application pointer is recovered 
 });
 
 test('analytics retains original generation context through async persistence, fail-open retry, and public export',async()=>{
- const {createAnalytics}=await import('../server/analytics.mjs');const {store}=await fixture(),analytics=createAnalytics({store,secret:'synthetic-key'}),a=await analytics.session({consent:true,visitor:randomUUID(),session:randomUUID()}),b=await analytics.session({consent:true,visitor:randomUUID(),session:randomUUID()}),ca=await analytics.context(a.token),cb=await analytics.context(b.token);
+ const {createAnalytics}=await import('../server/analytics.mjs');const {store}=await fixture(),analytics=createAnalytics({store,secret:'synthetic-key'}),a=await analytics.session({enabled:true,visitor:randomUUID(),session:randomUUID()}),b=await analytics.session({enabled:true,visitor:randomUUID(),session:randomUUID()}),ca=await analytics.context(a.token),cb=await analytics.context(b.token);
  let outage=true;const tracking={...analytics,outcome:async(...args)=>{if(outage)throw Error('synthetic analytics outage');return analytics.outcome(...args);}};
  const service=createService({store,analytics:tracking,feed:{status:async()=>({}),jobs:async()=>[]},provider:{available:async()=>true,generate:async()=>letter},dispatch:async()=>{}});
  const pending=await service.generate({...alice,analyticsContext:ca},job.id,randomUUID());assert.equal(pending.generation.analyticsContext,undefined);

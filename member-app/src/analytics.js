@@ -6,18 +6,23 @@ const REVOKE = 'roleclue.analytics.revoke.v1';
 const DAYS30 = 30 * 86400000;
 
 export function createAnalytics({ storage, sessionStorage, fetcher, crypto, now = Date.now, location, history, notify = () => {} }) {
-  let config, choice = read(storage, CHOICE), current = null, serial = Promise.resolve(), epoch = 0;
+  let config, choice = preference(read(storage, CHOICE)), current = null, serial = Promise.resolve(), epoch = 0;
   const pendingMemory = new Set();
   const issuedMemory = new Set();
   const observed = new Set();
   const query = new URLSearchParams(location.search);
+  const control = query.get('rc_analytics');
   const cachedAtStart = read(sessionStorage, SESSION);
   const candidate = query.get('rc_campaign') || (Date.parse(cachedAtStart?.expiresAt) > now() ? cachedAtStart.campaign : null);
   const campaign = /^[a-z0-9][a-z0-9-]{2,59}$/.test(candidate || '') ? candidate : 'direct';
   const test = query.get('rc_test') === '1' || (!query.has('rc_campaign') && cachedAtStart?.test === true);
   function read(store, key) { try { return JSON.parse(store.getItem(key)); } catch { return null; } }
+  function preference(value) { return value === 'decline' ? 'decline' : 'allow'; }
   function write(store, key, value) { store.setItem(key, JSON.stringify(value)); }
   function clear(store, key) { try { store.removeItem(key); } catch { /* Optional storage. */ } }
+  function replaceUrl() {
+    try { history.replaceState(history.state, '', `${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`); } catch { /* Optional URL cleanup must not prevent app startup. */ }
+  }
   function state() { return { choice, pending: pendingMemory.size > 0 || Boolean(read(storage, REVOKE)), available: Boolean(config) }; }
   async function post(path, body) {
     const response = await fetcher(`${(config?.apiBaseUrl || '').replace(/\/$/, '')}/api/analytics/${path}`, {
@@ -73,7 +78,7 @@ export function createAnalytics({ storage, sessionStorage, fetcher, crypto, now 
       current = cached;
       return ensureVisit(current);
     }
-    const result = await post('session', { consent: true, campaign, visitor: visitor.id, session: crypto.randomUUID(), test: test || config.mode === 'demo' });
+    const result = await post('session', { enabled: true, campaign, visitor: visitor.id, session: crypto.randomUUID(), test: test || config.mode === 'demo' });
     issuedMemory.add(result.token);
     if (version !== epoch || choice !== 'allow') {
       // A withdrawal during issuance must revoke the newly issued context too.
@@ -101,7 +106,7 @@ export function createAnalytics({ storage, sessionStorage, fetcher, crypto, now 
     return serial;
   }
   function track(kind, detail = {}) {
-    // Do not retain pre-consent actions for later backfill.
+    // Do not retain actions while analytics is disabled for later backfill.
     if (choice !== 'allow') return Promise.resolve(null);
     const version = epoch;
     return enqueue(async () => {
@@ -133,7 +138,7 @@ export function createAnalytics({ storage, sessionStorage, fetcher, crypto, now 
         clear(sessionStorage, SESSION);
       }
     } catch {
-      choice = null;
+      choice = 'decline';
       current = null;
       clear(storage, VISITOR);
       clear(sessionStorage, SESSION);
@@ -148,34 +153,39 @@ export function createAnalytics({ storage, sessionStorage, fetcher, crypto, now 
   }
   function externalChoice() {
     const old = current || read(sessionStorage, SESSION);
-    choice = read(storage, CHOICE);
+    choice = preference(read(storage, CHOICE));
     epoch++;
     current = null;
     if (choice !== 'allow') { try { pendingToken(old?.token); } catch {} void retryWithdrawal(); }
     if (choice !== 'allow') clear(sessionStorage, SESSION);
     notify(state());
+    if (choice === 'allow') void enqueue(session);
   }
   function configure(value) {
     config = value;
     if (query.has('rc_campaign') || query.has('rc_test')) {
       for (const key of ['rc_campaign', 'rc_test', 'utm_source', 'utm_medium', 'utm_campaign']) query.delete(key);
-      try { history.replaceState(history.state, '', `${location.pathname}${query.size ? `?${query}` : ''}${location.hash}`); } catch { /* Optional URL cleanup must not prevent app startup. */ }
+      replaceUrl();
     }
     notify(state());
     void retryWithdrawal();
     if (choice === 'allow') void enqueue(session);
   }
+  if (query.has('rc_analytics')) {
+    query.delete('rc_analytics');
+    replaceUrl();
+  }
+  if (control === 'off') void choose('decline');
   return { state, track, headers, choose, configure, retryWithdrawal, externalChoice };
 }
 
 function browserStorage(name) {
   try { return window[name]; } catch { return { getItem: () => null, removeItem: () => {}, setItem: () => { throw Error('Storage unavailable'); } }; }
 }
-let listener = () => {};
 export const analytics = typeof window === 'undefined' ? null : createAnalytics({
   storage: browserStorage('localStorage'), sessionStorage: browserStorage('sessionStorage'),
   fetcher: window.fetch.bind(window), crypto: window.crypto, location: window.location,
-  history: window.history, notify: value => listener(value),
+  history: window.history,
 });
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', event => {
@@ -184,4 +194,3 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => void analytics.retryWithdrawal());
 }
 export const track = (kind, detail) => analytics?.track(kind, detail);
-export function observeAnalytics(callback) { listener = callback; callback(analytics.state()); return () => { listener = () => {}; }; }
